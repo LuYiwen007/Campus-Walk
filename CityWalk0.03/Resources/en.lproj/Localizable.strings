@@ -1,0 +1,22 @@
+"settings.title" = "Settings";
+"settings.preferences" = "Preferences";
+"settings.chat" = "Chat Settings";
+"settings.data" = "Data & Storage";
+"settings.about" = "About";
+
+"settings.theme.system" = "Follow System";
+"settings.theme.dark" = "Dark Mode";
+"settings.font.size" = "Font Size";
+"settings.notifications" = "Notifications";
+"settings.sound" = "Sound Effects";
+"settings.haptics" = "Haptic Feedback";
+"settings.language" = "Language";
+"settings.clear.history" = "Clear Chat History";
+"settings.privacy" = "Privacy Policy";
+"settings.terms" = "Terms of Service";
+"settings.version" = "Version";
+
+"notification.route.start" = "Starting navigation to %@";
+"notification.route.turn" = "Turn %@ in %d meters";
+"notification.route.arrived" = "You have arrived at your destination";
+"notification.route.recalculating" = "Recalculating route..."; 
