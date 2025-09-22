@@ -24,9 +24,14 @@ class MessageViewModel: ObservableObject {
     }
     
     func sendMessage() {
-        guard !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        print("💬💬💬 sendMessage called with inputText: \(inputText) 💬💬💬")
+        guard !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { 
+            print("⚠️⚠️⚠️ Input text is empty, returning ⚠️⚠️⚠️")
+            return 
+        }
         let userMessage = Message(content: inputText, isUser: true, timestamp: Date())
         messages.append(userMessage)
+        print("📝📝📝 User message added to messages array 📝📝📝")
         let lower = inputText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         // 只mock一次推荐
         if !hasMocked && (lower.contains("40分钟的散步") || lower.contains("推荐几条路线") || lower.contains("40分钟") || lower.contains("散步")) {
@@ -44,9 +49,11 @@ class MessageViewModel: ObservableObject {
         isLoading = true
         lastBotText = ""
         currentBotText = ""
+        print("🤖🤖🤖 Calling qianwenService.streamMessage with: \(userInput) 🤖🤖🤖")
         qianwenService.streamMessage(
             query: userInput,
             onReceive: { [weak self] text in
+                print("📨📨📨 onReceive called with text: \(text) 📨📨📨")
                 Task { @MainActor in
                     guard let self = self else { return }
                     self.currentBotText += text
@@ -64,6 +71,7 @@ class MessageViewModel: ObservableObject {
                 }
             },
             onComplete: { [weak self] error in
+                print("🏁🏁🏁 sendMessage onComplete called with error: \(String(describing: error)) 🏁🏁🏁")
                 Task { @MainActor in
                     guard let self = self else { return }
                     self.isLoading = false

@@ -284,8 +284,6 @@ struct MessageView: View {
                     .sheet(isPresented: $showImagePicker) {
                         ImagePicker(sourceType: imagePickerSource) { image in
                             if let image = image, let data = image.jpegData(compressionQuality: 0.8) {
-                                let msg = Message(content: "[图片]", isUser: true, timestamp: Date(), imageData: data)
-                                viewModel.messages.append(msg)
                                 viewModel.sendImageMessage(data: data)
                             }
                         }

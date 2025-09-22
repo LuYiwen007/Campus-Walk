@@ -1,10 +1,14 @@
 import UIKit
-import MAMapKit
+import AMapNaviKit
+import AMapSearchKit
 
 class NavigationViewController: UIViewController {
     let mapView = MAMapView()
-    var navigationIndex = 0
-    let mockCoords: [CLLocationCoordinate2D] = [
+    var search: AMapSearchAPI?
+    var currentRoute: AMapRouteSearchResponse?
+    
+    // 保留的社区和历史路线数据（不删除）
+    let communityRoutes: [CLLocationCoordinate2D] = [
         CLLocationCoordinate2D(latitude: 23.128, longitude: 113.244),      // 恒宝广场
         CLLocationCoordinate2D(latitude: 23.114778, longitude: 113.237434),// 广州永庆坊
         CLLocationCoordinate2D(latitude: 23.13, longitude: 113.25),        // 陈家祠堂
@@ -16,8 +20,14 @@ class NavigationViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         setupMapView()
+        setupSearch()
         setupButton()
-        jumpToSegment(index: navigationIndex)
+        showCommunityRoutes()
+    }
+    
+    func setupSearch() {
+        search = AMapSearchAPI()
+        search?.delegate = self
     }
 
     func setupMapView() {
@@ -30,8 +40,8 @@ class NavigationViewController: UIViewController {
 
     func setupButton() {
         let button = UIButton(type: .system)
-        button.setTitle("开始/继续导航", for: .normal)
-        button.addTarget(self, action: #selector(nextSegment), for: .touchUpInside)
+        button.setTitle("开始导航", for: .normal)
+        button.addTarget(self, action: #selector(startNavigation), for: .touchUpInside)
         button.frame = CGRect(x: 40, y: view.bounds.height - 100, width: 200, height: 50)
         button.backgroundColor = .systemBlue
         button.setTitleColor(.white, for: .normal)
@@ -40,22 +50,40 @@ class NavigationViewController: UIViewController {
         view.addSubview(button)
     }
 
-    @objc func nextSegment() {
-        if navigationIndex < mockCoords.count - 1 {
-            navigationIndex += 1
-            jumpToSegment(index: navigationIndex)
-        }
+    @objc func startNavigation() {
+        // 使用高德地图搜索API计算步行路线
+        calculateWalkingRoute()
     }
-
-    func jumpToSegment(index: Int) {
-        let coord = mockCoords[index]
-        mapView.setCenter(coord, animated: true)
-        // 清除旧路线，绘制新路线
-        mapView.removeOverlays(mapView.overlays)
-        if index < mockCoords.count - 1 {
-            var coords = [coord, mockCoords[index + 1]]
-            let polyline = MAPolyline(coordinates: &coords, count: 2)
-            mapView.add(polyline)
+    
+    func calculateWalkingRoute() {
+        guard let search = search else { return }
+        
+        // 计算从第一个点到最后一个点的步行路线
+        let start = communityRoutes.first!
+        let end = communityRoutes.last!
+        
+        let request = AMapWalkingRouteSearchRequest()
+        request.origin = AMapGeoPoint.location(withLatitude: CGFloat(start.latitude), 
+                                             longitude: CGFloat(start.longitude))
+        request.destination = AMapGeoPoint.location(withLatitude: CGFloat(end.latitude), 
+                                                   longitude: CGFloat(end.longitude))
+        request.showFieldsType = AMapWalkingRouteShowFieldType.all
+        
+        search.aMapWalkingRouteSearch(request)
+    }
+    
+    func showCommunityRoutes() {
+        // 显示社区路线点
+        for (index, coord) in communityRoutes.enumerated() {
+            let annotation = MAPointAnnotation()
+            annotation.coordinate = coord
+            annotation.title = "景点 \(index + 1)"
+            mapView.addAnnotation(annotation)
+        }
+        
+        // 设置地图中心为第一个点
+        if let firstCoord = communityRoutes.first {
+            mapView.setCenter(firstCoord, animated: true)
         }
     }
 }
@@ -69,5 +97,57 @@ extension NavigationViewController: MAMapViewDelegate {
             return renderer
         }
         return nil
+    }
+    
+    func mapView(_ mapView: MAMapView!, viewFor annotation: MAAnnotation!) -> MAAnnotationView! {
+        if annotation is MAPointAnnotation {
+            let identifier = "pointAnnotation"
+            var annotationView = mapView.dequeueReusableAnnotationView(withIdentifier: identifier)
+            if annotationView == nil {
+                annotationView = MAPinAnnotationView(annotation: annotation, reuseIdentifier: identifier)
+            }
+            annotationView?.canShowCallout = true
+            return annotationView
+        }
+        return nil
+    }
+}
+
+// MARK: - AMapSearchDelegate
+extension NavigationViewController: AMapSearchDelegate {
+    func onRouteSearchDone(_ request: AMapRouteSearchBaseRequest!, response: AMapRouteSearchResponse!) {
+        guard let path = response.route.paths.first else {
+            print("步行路线计算失败")
+            return
+        }
+        
+        print("步行路线计算成功")
+        currentRoute = response
+        
+        // 清除旧路线
+        mapView.removeOverlays(mapView.overlays)
+        
+        // 绘制新路线
+        if let steps = path.steps as? [AMapStep] {
+            var coordinates: [CLLocationCoordinate2D] = []
+            
+            for step in steps {
+                let polylineStr = step.polyline
+                let points = polylineStr?.split(separator: ";").compactMap { pair -> CLLocationCoordinate2D? in
+                    let comps = pair.split(separator: ",")
+                    if comps.count == 2, let lon = Double(comps[0]), let lat = Double(comps[1]) {
+                        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+                    }
+                    return nil
+                } ?? []
+                coordinates.append(contentsOf: points)
+            }
+            
+            if !coordinates.isEmpty {
+                let polyline = MAPolyline(coordinates: &coordinates, count: UInt(coordinates.count))
+                mapView.add(polyline)
+                print("步行路线已绘制，点数：\(coordinates.count)")
+            }
+        }
     }
 } 
