@@ -24,53 +24,102 @@ class QianwenService: NSObject, URLSessionDataDelegate {
     
     private let apiKey = "sk-7c54a7c880bc41c29bb571fd2c348488" // API密钥
     private let baseURL = "http://192.168.3.39:8000" // 你的电脑IP地址
-    // private let appId = "7188b1ce823343f9b919d61f0a5f7d59" // 用户阿里云应用ID
-
-    // 发送消息，返回原始响应字符串
-    func sendMessage(_ text: String) async throws -> String {
-        // 先创建会话
-        let conversationId = try await createConversation(title: "AI聊天")
+    
+    // 测试网络连接
+    func testConnection() {
+        print("🔍🔍🔍 Testing connection to: \(baseURL) 🔍🔍🔍")
+        guard let url = URL(string: "\(baseURL)/health") else {
+            print("❌❌❌ Invalid health check URL ❌❌❌")
+            return
+        }
         
-        // 然后发送消息
-        let endpoint = "\(baseURL)/conversations/addChat.json"
+        let task = URLSession.shared.dataTask(with: url) { data, response, error in
+            if let error = error {
+                print("❌❌❌ Health check failed: \(error) ❌❌❌")
+            } else if let httpResponse = response as? HTTPURLResponse {
+                print("✅✅✅ Health check success: \(httpResponse.statusCode) ✅✅✅")
+                if let data = data, let responseString = String(data: data, encoding: .utf8) {
+                    print("📄📄📄 Health response: \(responseString) 📄📄📄")
+                }
+            }
+        }
+        task.resume()
+    }
+    private let appId = "7188b1ce823343f9b919d61f0a5f7d59" // 用户阿里云应用ID
+
+    // 调用通义千问API获取AI回复
+    private func callQianwenAPI(_ text: String) async throws -> String {
+        print("=== callQianwenAPI called with: \(text) ===")
+        print("=== API Key: \(apiKey) ===")
+        let endpoint = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
         guard let url = URL(string: endpoint) else {
+            print("=== Invalid URL: \(endpoint) ===")
             throw QianwenError.invalidURL
         }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
 
         let body: [String: Any] = [
-            "content": text,
-            "conversationId": conversationId,
-            "type": "TEXT",
-            "role": "user"
+            "model": "qwen-turbo",
+            "input": [
+                "messages": [
+                    [
+                        "role": "user",
+                        "content": text
+                    ]
+                ]
+            ],
+            "parameters": [
+                "result_format": "message"
+            ]
         ]
 
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        print("=== Request body: \(body) ===")
 
+        print("=== Making request to: \(endpoint) ===")
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
+            print("=== Invalid HTTP response ===")
             throw QianwenError.invalidResponse
+        }
+
+        print("=== HTTP Status Code: \(httpResponse.statusCode) ===")
+        if let responseString = String(data: data, encoding: .utf8) {
+            print("=== Response data: \(responseString) ===")
         }
 
         if httpResponse.statusCode != 200 {
+            print("=== HTTP error: \(httpResponse.statusCode) ===")
+            print("=== Response headers: \(httpResponse.allHeaderFields) ===")
             throw QianwenError.invalidResponse
         }
 
-        guard let responseString = String(data: data, encoding: .utf8) else {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let output = json["output"] as? [String: Any],
+              let choices = output["choices"] as? [[String: Any]],
+              let firstChoice = choices.first,
+              let message = firstChoice["message"] as? [String: Any],
+              let content = message["content"] as? String else {
+            print("=== Failed to parse response JSON ===")
             throw QianwenError.invalidResponse
         }
 
-        return responseString
+        print("=== Extracted content: \(content) ===")
+        return content
     }
     
     // 创建会话
     private func createConversation(title: String) async throws -> Int {
+        print("🔧🔧🔧 createConversation called with title: \(title) 🔧🔧🔧")
         let endpoint = "\(baseURL)/conversations/add.json"
+        print("🌐🌐🌐 Creating conversation at: \(endpoint) 🌐🌐🌐")
         guard let url = URL(string: endpoint) else {
+            print("❌❌❌ Invalid URL: \(endpoint) ❌❌❌")
             throw QianwenError.invalidURL
         }
 
@@ -84,24 +133,49 @@ class QianwenService: NSObject, URLSessionDataDelegate {
         ]
 
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        print("📦📦📦 Request body: \(body) 📦📦📦")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        print("🚀🚀🚀 Making request to create conversation 🚀🚀🚀")
+        
+        // 添加超时配置
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 10.0
+        config.timeoutIntervalForResource = 30.0
+        let session = URLSession(configuration: config)
+        
+        do {
+            let (data, response) = try await session.data(for: request)
+            print("📡📡📡 Received response from server 📡📡📡")
 
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw QianwenError.invalidResponse
+            guard let httpResponse = response as? HTTPURLResponse else {
+                print("❌❌❌ Invalid HTTP response ❌❌❌")
+                throw QianwenError.invalidResponse
+            }
+
+            print("📊📊📊 HTTP Status Code: \(httpResponse.statusCode) 📊📊📊")
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("📄📄📄 Response data: \(responseString) 📄📄📄")
+            }
+
+            if httpResponse.statusCode != 200 {
+                print("❌❌❌ HTTP error: \(httpResponse.statusCode) ❌❌❌")
+                throw QianwenError.invalidResponse
+            }
+
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let dataDict = json["data"] as? [String: Any],
+                  let id = dataDict["id"] as? Int else {
+                print("❌❌❌ Failed to parse response JSON ❌❌❌")
+                print("📄📄📄 Raw response: \(String(data: data, encoding: .utf8) ?? "nil") 📄📄📄")
+                throw QianwenError.invalidResponse
+            }
+
+            print("✅✅✅ Successfully created conversation with ID: \(id) ✅✅✅")
+            return id
+        } catch {
+            print("💥💥💥 Network error in createConversation: \(error) 💥💥💥")
+            throw error
         }
-
-        if httpResponse.statusCode != 200 {
-            throw QianwenError.invalidResponse
-        }
-
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let dataDict = json["data"] as? [String: Any],
-              let id = dataDict["id"] as? Int else {
-            throw QianwenError.invalidResponse
-        }
-
-        return id
     }
     
     // 根据用户输入生成会话标题 - 用户消息格式
@@ -197,6 +271,11 @@ class QianwenService: NSObject, URLSessionDataDelegate {
         onReceive: @escaping (String) -> Void,
         onComplete: @escaping (Error?) -> Void
     ) {
+        print("🚀🚀🚀 streamMessage called with query: \(query) 🚀🚀🚀")
+        
+        // 先测试网络连接
+        testConnection()
+        
         self.onReceive = onReceive
         self.onComplete = onComplete
         self.receivedData = Data()
@@ -207,12 +286,16 @@ class QianwenService: NSObject, URLSessionDataDelegate {
             do {
                 // 根据用户输入生成更有意义的标题
                 let title = generateConversationTitle(from: query)
+                print("🎯🎯🎯 Creating conversation with title: \(title) 🎯🎯🎯")
                 let conversationId = try await createConversation(title: title)
                 self.currentConversationId = conversationId
+                print("✅✅✅ Conversation created with ID: \(conversationId) ✅✅✅")
                 
                 // 发送消息到我们的后端
                 let endpoint = "\(baseURL)/conversations/addChat.json"
+                print("📤📤📤 Sending message to backend: \(endpoint) 📤📤📤")
                 guard let url = URL(string: endpoint) else {
+                    print("❌❌❌ Invalid URL: \(endpoint) ❌❌❌")
                     onComplete(QianwenError.invalidURL)
                     return
                 }
@@ -245,6 +328,7 @@ class QianwenService: NSObject, URLSessionDataDelegate {
                     onComplete(error)
                 }
             } catch {
+                print("💥💥💥 Error in streamMessage Task: \(error) 💥💥💥")
                 onComplete(error)
             }
         }
@@ -252,58 +336,84 @@ class QianwenService: NSObject, URLSessionDataDelegate {
     
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         receivedData.append(data)
-        
-        // 处理我们后端的JSON响应
-        if let string = String(data: data, encoding: .utf8) {
-            print("=== Received response: \(string) ===")
-            
-            // 解析JSON响应
-            if let jsonData = string.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
-                
-                print("=== Parsed JSON: \(json) ===")
-                
-                // 检查是否成功
-                if let success = json["success"] as? Bool, success {
-                    print("=== Success: true, sending response ===")
-                    // 模拟AI回复（这里可以集成真实的AI服务）
-                    let aiResponse = "我收到了你的消息：\(self.currentQuery)。这是一个测试回复。"
-                    
-                    // 模拟流式输出
-                    DispatchQueue.main.async {
-                        print("=== Calling onReceive with: \(aiResponse) ===")
-                        self.onReceive?(aiResponse)
-                    }
-                    
-                    // 将AI回复也存储到数据库
-                    self.saveAIReply(conversationId: self.currentConversationId, content: aiResponse)
-                } else {
-                    print("=== Success: false ===")
-                    // 处理错误
-                    let errorMessage = json["resultCode"] as? String ?? "未知错误"
-                    DispatchQueue.main.async {
-                        self.onReceive?("错误：\(errorMessage)")
-                    }
-                }
-            } else {
-                print("=== Failed to parse JSON ===")
-            }
-        } else {
-            print("=== Failed to convert data to string ===")
-        }
+        print("=== Received data chunk, total size: \(receivedData.count) ===")
     }
     
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         if let error = error {
+            print("=== Network error: \(error) ===")
             self.onComplete?(QianwenError.networkError(error))
         } else {
-            self.onComplete?(nil)
+            print("=== Request completed successfully ===")
+            print("=== Total received data size: \(receivedData.count) ===")
+            
+            // 处理完整的响应数据
+            if let string = String(data: receivedData, encoding: .utf8) {
+                print("=== Complete response: \(string) ===")
+                
+                // 解析JSON响应
+                if let jsonData = string.data(using: .utf8),
+                   let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
+                    
+                    print("=== Parsed JSON: \(json) ===")
+                    
+                    // 检查是否成功
+                    if let success = json["success"] as? Bool, success {
+                        print("=== Success: true, calling AI API ===")
+                        print("=== Current Query: \(self.currentQuery) ===")
+                        // 调用通义千问API
+                        Task {
+                            do {
+                                print("=== Starting Qianwen API call ===")
+                                let aiResponse = try await self.callQianwenAPI(self.currentQuery)
+                                print("=== Qianwen API response received: \(aiResponse) ===")
+                                
+                                DispatchQueue.main.async {
+                                    print("=== Calling onReceive with: \(aiResponse) ===")
+                                    self.onReceive?(aiResponse)
+                                    print("=== onReceive called successfully ===")
+                                    
+                                    // 调用完成回调
+                                    self.onComplete?(nil)
+                                }
+                                
+                                // 将AI回复存储到数据库
+                                self.saveAIReply(conversationId: self.currentConversationId, content: aiResponse)
+                            } catch {
+                                print("=== Qianwen API error: \(error) ===")
+                                DispatchQueue.main.async {
+                                    self.onReceive?("AI调用失败：\(error.localizedDescription)")
+                                    self.onComplete?(error)
+                                }
+                            }
+                        }
+                    } else {
+                        print("=== Success: false ===")
+                        // 处理错误
+                        let errorMessage = json["resultCode"] as? String ?? "未知错误"
+                        DispatchQueue.main.async {
+                            self.onReceive?("错误：\(errorMessage)")
+                            self.onComplete?(QianwenError.invalidResponse)
+                        }
+                    }
+                } else {
+                    print("=== Failed to parse JSON ===")
+                    DispatchQueue.main.async {
+                        self.onReceive?("服务器响应格式错误")
+                        self.onComplete?(QianwenError.invalidResponse)
+                    }
+                }
+            } else {
+                print("=== Failed to convert data to string ===")
+                DispatchQueue.main.async {
+                    self.onReceive?("服务器响应数据错误")
+                    self.onComplete?(QianwenError.invalidResponse)
+                }
+            }
         }
         
         // 清理资源
         self.receivedData = Data()
-        self.onReceive = nil
-        self.onComplete = nil
         self.dataTask = nil
     }
 } 

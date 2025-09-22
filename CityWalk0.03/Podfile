@@ -4,13 +4,12 @@ target 'CityWalk' do
   # Comment the next line if you don't want to use dynamic frameworks
   use_frameworks!
 
-  # 高德地图轻量版SDK
+  # 高德地图完整SDK
   pod 'AMapLocation' # 定位SDK
   pod 'AMapSearch', '~> 9.7.4'    # 搜索SDK
-  # pod 'AMap3DMap'  # 3D地图SDK
-
-  # config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
-  pod 'AMap3DMap', '~> 10.0.600'
+  
+  # 高德导航SDK (包含MAMapKit和AMapNaviKit)
+  pod 'AMapNavi', '~> 10.1.302'   # 导航SDK (包含地图和导航UI组件)
 
 end
 
