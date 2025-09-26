@@ -6,6 +6,8 @@ class MessageViewModel: ObservableObject {
     @Published var messages: [Message] = []
     @Published var inputText: String = ""
     @Published var isLoading: Bool = false
+    @Published var showSegmentedRoute: Bool = false
+    @Published var currentConversationId: Int = 0
     
     private let qianwenService: QianwenService
     private var lastBotText: String = ""
@@ -21,6 +23,13 @@ class MessageViewModel: ObservableObject {
         ]
         hasWelcomed = true
         hasMocked = false
+        
+        // 设置会话创建回调
+        qianwenService.onConversationCreated = { [weak self] conversationId in
+            DispatchQueue.main.async {
+                self?.currentConversationId = conversationId
+            }
+        }
     }
     
     func sendMessage() {
@@ -77,6 +86,7 @@ class MessageViewModel: ObservableObject {
                     self.isLoading = false
                     self.lastBotText = ""
                     self.currentBotText = ""
+                    
                     if let error = error {
                         let errorMessage: String
                         switch error {
@@ -95,6 +105,9 @@ class MessageViewModel: ObservableObject {
                         }
                         let errorMsg = Message(content: errorMessage, isUser: false, timestamp: Date())
                         self.messages.append(errorMsg)
+                    } else {
+                        // 成功完成，检查是否需要显示分段路线
+                        self.checkAndShowSegmentedRoute()
                     }
                 }
             }
@@ -157,5 +170,30 @@ class MessageViewModel: ObservableObject {
                 }
             }
         )
+    }
+    
+    // 检查并显示分段路线
+    private func checkAndShowSegmentedRoute() {
+        // 检查最后一条AI消息是否包含路线推荐
+        guard let lastMessage = messages.last,
+              !lastMessage.isUser,
+              lastMessage.content.contains("路线") else {
+            return
+        }
+        
+        // 延迟一点时间让用户看到完整回复，然后显示分段路线选项
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            self.showSegmentedRoute = true
+        }
+    }
+    
+    // 显示分段路线
+    func showSegmentedRouteView() {
+        showSegmentedRoute = true
+    }
+    
+    // 隐藏分段路线
+    func hideSegmentedRouteView() {
+        showSegmentedRoute = false
     }
 } 

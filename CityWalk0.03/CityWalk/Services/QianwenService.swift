@@ -19,6 +19,11 @@ class QianwenService: NSObject, URLSessionDataDelegate {
     private var onComplete: ((Error?) -> Void)?
     private var currentQuery: String = ""
     private var currentConversationId: Int = 0
+    private var stage1Locations: String = "" // 存储第一阶段的地点信息
+    private var isStage1Complete: Bool = false // 标记第一阶段是否完成
+    
+    // 回调函数，用于通知外部当前会话ID
+    var onConversationCreated: ((Int) -> Void)?
     
     private override init() {}
     
@@ -198,6 +203,43 @@ class QianwenService: NSObject, URLSessionDataDelegate {
         return "[用户] \(truncated)... (\(timeString))"
     }
     
+    // 保存地点信息到数据库
+    private func saveRouteLocations(conversationId: Int, locations: String) {
+        Task {
+            let endpoint = "\(baseURL)/route-locations/save.json"
+            guard let url = URL(string: endpoint) else { return }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            let body: [String: Any] = [
+                "conversationId": conversationId,
+                "locations": locations,
+                "routeType": "walking"
+            ]
+            
+            do {
+                let jsonData = try JSONSerialization.data(withJSONObject: body, options: [])
+                request.httpBody = jsonData
+                
+                print("Saving route locations: \(locations)")
+                
+                let task = URLSession.shared.dataTask(with: request) { data, response, error in
+                    if let error = error {
+                        print("Error saving route locations: \(error)")
+                    } else if let data = data, let responseString = String(data: data, encoding: .utf8) {
+                        print("Route locations saved: \(responseString)")
+                    }
+                }
+                task.resume()
+                
+            } catch {
+                print("Error serializing route locations: \(error)")
+            }
+        }
+    }
+    
     // 保存AI回复到数据库 - 创建单独的AI会话
     private func saveAIReply(conversationId: Int, content: String) {
         Task {
@@ -280,6 +322,8 @@ class QianwenService: NSObject, URLSessionDataDelegate {
         self.onComplete = onComplete
         self.receivedData = Data()
         self.currentQuery = query
+        self.stage1Locations = ""
+        self.isStage1Complete = false
 
         // 先创建会话，然后发送消息
         Task {
@@ -290,6 +334,11 @@ class QianwenService: NSObject, URLSessionDataDelegate {
                 let conversationId = try await createConversation(title: title)
                 self.currentConversationId = conversationId
                 print("✅✅✅ Conversation created with ID: \(conversationId) ✅✅✅")
+                
+                // 通知外部会话已创建
+                DispatchQueue.main.async {
+                    self.onConversationCreated?(conversationId)
+                }
                 
                 // 发送消息到我们的后端
                 let endpoint = "\(baseURL)/conversations/addChat.json"
@@ -368,17 +417,9 @@ class QianwenService: NSObject, URLSessionDataDelegate {
                                 let aiResponse = try await self.callQianwenAPI(self.currentQuery)
                                 print("=== Qianwen API response received: \(aiResponse) ===")
                                 
-                                DispatchQueue.main.async {
-                                    print("=== Calling onReceive with: \(aiResponse) ===")
-                                    self.onReceive?(aiResponse)
-                                    print("=== onReceive called successfully ===")
-                                    
-                                    // 调用完成回调
-                                    self.onComplete?(nil)
-                                }
+                                // 处理二次输出逻辑
+                                self.processTwoStageResponse(aiResponse: aiResponse)
                                 
-                                // 将AI回复存储到数据库
-                                self.saveAIReply(conversationId: self.currentConversationId, content: aiResponse)
                             } catch {
                                 print("=== Qianwen API error: \(error) ===")
                                 DispatchQueue.main.async {
@@ -415,5 +456,67 @@ class QianwenService: NSObject, URLSessionDataDelegate {
         // 清理资源
         self.receivedData = Data()
         self.dataTask = nil
+    }
+    
+    // 处理二次输出逻辑
+    private func processTwoStageResponse(aiResponse: String) {
+        print("=== Processing two-stage response ===")
+        
+        // 检查是否包含地点信息（第一阶段）
+        if !isStage1Complete && aiResponse.contains("正在为您搜索相关地点") {
+            // 提取地点信息
+            let locations = extractLocationsFromResponse(aiResponse)
+            if !locations.isEmpty {
+                stage1Locations = locations
+                isStage1Complete = true
+                
+                // 保存地点信息到数据库
+                saveRouteLocations(conversationId: currentConversationId, locations: locations)
+                
+                print("=== Stage 1 completed, locations: \(locations) ===")
+                // 第一阶段不显示给用户，继续等待第二阶段
+                return
+            }
+        }
+        
+        // 第二阶段：显示完整路线给用户
+        if isStage1Complete {
+            DispatchQueue.main.async {
+                print("=== Stage 2: Displaying full route to user ===")
+                self.onReceive?(aiResponse)
+                self.onComplete?(nil)
+            }
+            
+            // 将AI回复存储到数据库
+            saveAIReply(conversationId: currentConversationId, content: aiResponse)
+        } else {
+            // 如果没有检测到第一阶段，直接显示给用户（兼容性处理）
+            DispatchQueue.main.async {
+                self.onReceive?(aiResponse)
+                self.onComplete?(nil)
+            }
+            saveAIReply(conversationId: currentConversationId, content: aiResponse)
+        }
+    }
+    
+    // 从AI响应中提取地点信息
+    private func extractLocationsFromResponse(_ response: String) -> String {
+        // 查找"正在为您搜索相关地点:"后面的内容
+        if let range = response.range(of: "正在为您搜索相关地点:") {
+            let afterColon = response[range.upperBound...]
+            let locationsString = String(afterColon).trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            // 移除末尾的省略号
+            let cleanLocations = locationsString.replacingOccurrences(of: "...", with: "")
+            
+            // 将地点用"--"分隔
+            let locations = cleanLocations.components(separatedBy: "、")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            
+            return locations.joined(separator: "--")
+        }
+        
+        return ""
     }
 } 

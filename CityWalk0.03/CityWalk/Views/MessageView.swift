@@ -238,6 +238,11 @@ struct MessageView: View {
                             imagePickerSource = .camera
                             showImagePicker = true
                         },
+                        .default(Text("AR 识别")) {
+                            // 打开 AR 识别入口
+                            let vc = UIHostingController(rootView: ARBuildingInfoView())
+                            UIApplication.shared.windows.first?.rootViewController?.present(vc, animated: true)
+                        },
                         .default(Text("从相册选择")) {
                             imagePickerSource = .photoLibrary
                             showImagePicker = true
@@ -287,6 +292,9 @@ struct MessageView: View {
                                 viewModel.sendImageMessage(data: data)
                             }
                         }
+                    }
+                    .sheet(isPresented: $viewModel.showSegmentedRoute) {
+                        SegmentedRouteView(conversationId: viewModel.currentConversationId)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
