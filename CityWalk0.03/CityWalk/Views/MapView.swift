@@ -11,7 +11,7 @@ struct MapView: View {
     @Binding var destinationLocation: CLLocationCoordinate2D?
     var routeCoordinates: [CLLocationCoordinate2D]? = nil // polyline
     var centerCoordinate: CLLocationCoordinate2D? = nil // 新增地图中心
-    @State private var showRouteSheet: Bool = false
+    // showRouteSheet 已移除
     @State private var mapViewId = UUID()
     // 新增：支持外部切换Place
     @Binding var selectedPlaceIndex: Int
@@ -35,34 +35,15 @@ struct MapView: View {
                     .allowsHitTesting(false)
             }
         }
-        .sheet(isPresented: $showRouteSheet) {
-            if let routeInfo = routeInfo {
-                RouteDetailView(route: RouteDetailView_Previews.mockRoute, selectedPlaceIndex: $selectedPlaceIndex, onPlaceChange: { idx, coord in
-                    startCoordinateBinding = coord
-                    // 新增：同步设置destinationLocation为当前Place的nextCoordinate
-                    if let route = RouteDetailView_Previews.mockRoute as? Route, idx < route.places.count {
-                        destinationLocation = route.places[idx].nextCoordinate
-                    }
-                })
-                    .presentationDetents([.height(UIScreen.main.bounds.height * 0.6), .large])
-                    .presentationDragIndicator(.visible)
-            }
-        }
         .onAppear {
-            if routeInfo != nil {
-                showRouteSheet = true
-            }
-            // 监听“ShowRouteDetailSheet”通知
-            NotificationCenter.default.addObserver(forName: NSNotification.Name("ShowRouteDetailSheet"), object: nil, queue: .main) { _ in
-                showRouteSheet = true
-            }
+            // 路线详情功能已移除
         }
         .onChange(of: centerCoordinate?.latitude) { _ in mapViewId = UUID() }
         .onChange(of: centerCoordinate?.longitude) { _ in mapViewId = UUID() }
         .onChange(of: routeCoordinates?.first?.latitude) { _ in mapViewId = UUID() }
         .onChange(of: routeCoordinates?.last?.longitude) { _ in mapViewId = UUID() }
         .onChange(of: routeInfo) { newValue in
-            showRouteSheet = newValue != nil
+            // 路线详情功能已移除
         }
         .onChange(of: startCoordinateBinding) { _ in mapViewId = UUID() }
         .onChange(of: destinationLocation) { _ in mapViewId = UUID() }

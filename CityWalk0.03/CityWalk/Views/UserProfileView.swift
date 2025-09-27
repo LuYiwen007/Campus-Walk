@@ -1,5 +1,5 @@
 import SwiftUI
-import AMapNaviKit
+import MAMapKit
 import AMapFoundationKit
 import AMapSearchKit
 import AMapLocationKit

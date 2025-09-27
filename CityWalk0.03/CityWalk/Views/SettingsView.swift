@@ -82,6 +82,8 @@ struct SettingsView: View {
                     }
                 }
                 
+                
+                
                 // 关于分区
                 Section("关于") {
                     Button("隐私政策") {

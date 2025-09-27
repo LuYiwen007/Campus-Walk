@@ -69,21 +69,8 @@ struct MessageView: View {
                     .ignoresSafeArea()
                     .transition(.opacity)
                 }
-                // 右下角按钮区：回到路线详情+聊天小圆圈
+                // 右下角按钮区：只保留聊天小圆圈
                 HStack(spacing: 16) {
-                    Button(action: {
-                        // 拉起路线详情
-                        routeToShow = "推荐路线"
-                        NotificationCenter.default.post(name: NSNotification.Name("ShowRouteDetailSheet"), object: nil)
-                    }) {
-                        Image(systemName: "list.bullet.rectangle")
-                            .font(.system(size: 23, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 50, height: 50)
-                            .background(Color.blue)
-                            .clipShape(Circle())
-                            .shadow(radius: 4)
-                    }
                     Button(action: {
                         withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                             isChatMinimized = false
@@ -238,6 +225,11 @@ struct MessageView: View {
                             imagePickerSource = .camera
                             showImagePicker = true
                         },
+                        .default(Text("AR 识别")) {
+                            // 打开 AR 识别入口
+                            let vc = UIHostingController(rootView: ARBuildingInfoView())
+                            UIApplication.shared.windows.first?.rootViewController?.present(vc, animated: true)
+                        },
                         .default(Text("从相册选择")) {
                             imagePickerSource = .photoLibrary
                             showImagePicker = true
@@ -287,6 +279,9 @@ struct MessageView: View {
                                 viewModel.sendImageMessage(data: data)
                             }
                         }
+                    }
+                    .sheet(isPresented: $viewModel.showSegmentedRoute) {
+                        SegmentedRouteView(conversationId: viewModel.currentConversationId)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

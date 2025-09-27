@@ -151,7 +151,7 @@ struct TripView: View {
                                         showStats = true
                                     })
                                     .onTapGesture {
-                                        selectedRoute = RouteDetailView_Previews.mockRoute
+                                        // 示例路线已移除，这里可以添加其他逻辑
                                     }
                                 }
                             }

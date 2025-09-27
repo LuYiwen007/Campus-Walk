@@ -6,6 +6,8 @@ class MessageViewModel: ObservableObject {
     @Published var messages: [Message] = []
     @Published var inputText: String = ""
     @Published var isLoading: Bool = false
+    @Published var showSegmentedRoute: Bool = false
+    @Published var currentConversationId: Int = 0
     
     private let qianwenService: QianwenService
     private var lastBotText: String = ""
@@ -21,6 +23,13 @@ class MessageViewModel: ObservableObject {
         ]
         hasWelcomed = true
         hasMocked = false
+        
+        // 设置会话创建回调
+        qianwenService.onConversationCreated = { [weak self] conversationId in
+            DispatchQueue.main.async {
+                self?.currentConversationId = conversationId
+            }
+        }
     }
     
     func sendMessage() {
@@ -33,14 +42,7 @@ class MessageViewModel: ObservableObject {
         messages.append(userMessage)
         print("📝📝📝 User message added to messages array 📝📝📝")
         let lower = inputText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        // 只mock一次推荐
-        if !hasMocked && (lower.contains("40分钟的散步") || lower.contains("推荐几条路线") || lower.contains("40分钟") || lower.contains("散步")) {
-            let mockReply = Message(content: "当然可以！以下是为你在广州精心挑选的三条适合四十分钟左右散步的路线，每条路线都有不同的风格，适合不同心情和喜好：\n\n⸻\n\n🌿 路线一：越秀山-中山纪念堂文化散步线\n\n适合喜欢历史文化与自然风光的人\n    • 起点：越秀公园东门\n    • 路线：越秀公园 → 五羊雕像 → 镇海楼 → 下山 → 中山纪念堂外环\n    • 终点：中山纪念堂地铁站\n    • 总时长：约40分钟\n    • 亮点：\n    • 青山绿水，风景优美\n    • 可观广州古城墙遗址、镇海楼\n    • 历史文化氛围浓厚\n\n⸻\n\n🏙 路线二：珠江新城滨江夜景线\n\n适合晚上散步，享受城市灯光和江景\n    • 起点：花城广场\n    • 路线：花城广场 → 广州塔方向江边 → 海心沙 → 珠江边亲水平台散步\n    • 终点：猎德桥附近\n    • 总时长：约40分钟\n    • 亮点：\n    • 城市夜景极美，适合拍照\n    • 风大凉爽，适合夏季夜晚\n    • 途经广州塔、IFC、珠江新城灯光带\n\n⸻\n\n🌳 路线三：华南植物园绿意生态线\n\n适合清晨或周末放松身心，远离喧嚣\n    • 起点：华南植物园正门\n    • 路线：棕榈园 → 荷花池 → 竹园 → 热带温室外围步道\n    • 终点：回到正门（环线）\n    • 总时长：约40-50分钟（视步速而定）\n    • 亮点：\n    • 植被丰富，空气清新\n    • 四季花开，适合慢步调\n    • 收费入园（票价约20元）\n\n⸻\n\n你想要选择哪条路线呢？", isUser: false, timestamp: Date(), options: ["路线一：文化散步", "路线二：滨江夜景", "路线三：生态绿意"])
-            messages.append(mockReply)
-            hasMocked = true
-            inputText = ""
-            return
-        }
+        // 移除越秀公园路线推荐
         // 之后的对话都走大模型
         let botMessage = Message(content: "", isUser: false, timestamp: Date())
         messages.append(botMessage)
@@ -77,6 +79,7 @@ class MessageViewModel: ObservableObject {
                     self.isLoading = false
                     self.lastBotText = ""
                     self.currentBotText = ""
+                    
                     if let error = error {
                         let errorMessage: String
                         switch error {
@@ -95,6 +98,9 @@ class MessageViewModel: ObservableObject {
                         }
                         let errorMsg = Message(content: errorMessage, isUser: false, timestamp: Date())
                         self.messages.append(errorMsg)
+                    } else {
+                        // 成功完成，检查是否需要显示分段路线
+                        self.checkAndShowSegmentedRoute()
                     }
                 }
             }
@@ -157,5 +163,30 @@ class MessageViewModel: ObservableObject {
                 }
             }
         )
+    }
+    
+    // 检查并显示分段路线
+    private func checkAndShowSegmentedRoute() {
+        // 检查最后一条AI消息是否包含路线推荐
+        guard let lastMessage = messages.last,
+              !lastMessage.isUser,
+              lastMessage.content.contains("路线") else {
+            return
+        }
+        
+        // 延迟一点时间让用户看到完整回复，然后显示分段路线选项
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            self.showSegmentedRoute = true
+        }
+    }
+    
+    // 显示分段路线
+    func showSegmentedRouteView() {
+        showSegmentedRoute = true
+    }
+    
+    // 隐藏分段路线
+    func hideSegmentedRouteView() {
+        showSegmentedRoute = false
     }
 } 

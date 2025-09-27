@@ -10,6 +10,7 @@ import SwiftData
 import AMapFoundationKit
 import AMapSearchKit
 import AMapLocationKit
+import MAMapKit
 
 // 新增AppDelegate类用于高德Key初始化
 class AppDelegate: NSObject, UIApplicationDelegate {
@@ -19,7 +20,12 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         AMapLocationManager.updatePrivacyAgree(.didAgree)
         AMapSearchAPI.updatePrivacyShow(.didShow, privacyInfo: .didContain)
         AMapSearchAPI.updatePrivacyAgree(.didAgree)
-        AMapServices.shared().apiKey = "ea6ffe534577fb90a8ce52a72c0aa121"
+        // 地图组件也需在实例化前进行隐私合规设置
+        MAMapView.updatePrivacyShow(.didShow, privacyInfo: .didContain)
+        MAMapView.updatePrivacyAgree(.didAgree)
+        // 统一设置 Key 与 HTTPS
+        AMapServices.shared().enableHTTPS = true
+        AMapServices.shared().apiKey = "4c6e7aa728f408e1fc754200f5bed2e4"
         return true
     }
 }

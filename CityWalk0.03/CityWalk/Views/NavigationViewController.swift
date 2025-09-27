@@ -1,5 +1,5 @@
 import UIKit
-import AMapNaviKit
+import MAMapKit
 import AMapSearchKit
 
 class NavigationViewController: UIViewController {

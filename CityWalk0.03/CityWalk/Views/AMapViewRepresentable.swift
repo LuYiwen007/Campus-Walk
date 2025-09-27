@@ -1,8 +1,9 @@
 import SwiftUI
-import AMapNaviKit
+import MAMapKit
 import AMapSearchKit
 import CoreLocation
 import AMapLocationKit
+import AMapFoundationKit
 
 extension CLLocationCoordinate2D: Equatable {
     public static func == (lhs: CLLocationCoordinate2D, rhs: CLLocationCoordinate2D) -> Bool {
@@ -39,8 +40,7 @@ struct AMapViewRepresentable: UIViewRepresentable {
         mapView.isRotateEnabled = false
         mapView.isScrollEnabled = true
         mapView.isZoomEnabled = true
-        AMapServices.shared().enableHTTPS = true
-        AMapServices.shared().apiKey = "ea6ffe534577fb90a8ce52a72c0aa121"
+        // Key 与隐私合规在 AppDelegate 中统一设置
         context.coordinator.mapView = mapView
         // 主动请求系统定位权限
         let clManager = CLLocationManager()
@@ -102,6 +102,27 @@ struct AMapViewRepresentable: UIViewRepresentable {
             locateBtn.widthAnchor.constraint(equalToConstant: 48),
             locateBtn.heightAnchor.constraint(equalToConstant: 48)
         ])
+        // 新增：右下角 AR 按钮
+        let arBtn = UIButton(type: .custom)
+        arBtn.setTitle("AR", for: .normal)
+        arBtn.titleLabel?.font = UIFont.boldSystemFont(ofSize: 16)
+        arBtn.setTitleColor(.white, for: .normal)
+        arBtn.layer.cornerRadius = 18
+        arBtn.layer.shadowOpacity = 0.12
+        arBtn.layer.shadowRadius = 6
+        arBtn.translatesAutoresizingMaskIntoConstraints = false
+        arBtn.addTarget(context.coordinator, action: #selector(Coordinator.openARDirect), for: .touchUpInside)
+        container.addSubview(arBtn)
+        // 初始：在用户确认导航前禁用并置灰
+        context.coordinator.arButton = arBtn
+        context.coordinator.navigationConfirmed = false
+        context.coordinator.updateARButtonState()
+        NSLayoutConstraint.activate([
+            arBtn.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -18),
+            arBtn.bottomAnchor.constraint(equalTo: locateBtn.topAnchor, constant: -12),
+            arBtn.widthAnchor.constraint(equalToConstant: 48),
+            arBtn.heightAnchor.constraint(equalToConstant: 36)
+        ])
         // 信息卡片（初始隐藏）
         let infoCard = context.coordinator.infoCardView
         infoCard.isHidden = true
@@ -110,8 +131,7 @@ struct AMapViewRepresentable: UIViewRepresentable {
         NSLayoutConstraint.activate([
             infoCard.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
             infoCard.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
-            infoCard.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -32),
-            infoCard.heightAnchor.constraint(equalToConstant: 110)
+            infoCard.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -32)
         ])
         // 优化指南针位置
         mapView.compassOrigin = CGPoint(x: container.bounds.width - 60, y: 80)
@@ -149,6 +169,9 @@ struct AMapViewRepresentable: UIViewRepresentable {
                 context.coordinator.lastRouteStart = start
                 context.coordinator.lastRouteDest = dest
                 context.coordinator.searchWalkingRoute(from: start, to: dest, on: mapView)
+                // 自动发起路线规划时，视为已确认导航
+                context.coordinator.navigationConfirmed = true
+                context.coordinator.updateARButtonState()
             }
         }
         print("[AMap] updateUIView 结束")
@@ -171,6 +194,9 @@ struct AMapViewRepresentable: UIViewRepresentable {
         // 新增：缓存起点和终点标注
         var startAnnotation: MAPointAnnotation?
         var endAnnotation: MAPointAnnotation?
+        // 新增：AR按钮与确认状态
+        var arButton: UIButton?
+        var navigationConfirmed: Bool = false
         
         init(_ parent: AMapViewRepresentable) {
             self.parent = parent
@@ -184,11 +210,31 @@ struct AMapViewRepresentable: UIViewRepresentable {
                 if let userLoc = self.latestUserLocation ?? mapView.userLocation.location?.coordinate {
                     print("点击导航按钮，准备发起步行路线规划：\(userLoc) -> \(dest)")
                     self.searchWalkingRoute(from: userLoc, to: dest, on: mapView)
+                    // 用户主动点击路线/导航，视为确认导航
+                    self.navigationConfirmed = true
+                    self.updateARButtonState()
                 } else {
                     print("点击导航按钮，但未获取到用户当前位置（userLocation为nil）")
                 }
                 self.infoCardView.isHidden = true
             }
+        }
+        // 根据确认状态更新AR按钮UI
+        func updateARButtonState() {
+            guard let arBtn = arButton else { return }
+            if navigationConfirmed {
+                arBtn.isEnabled = true
+                arBtn.backgroundColor = .systemBlue
+                arBtn.alpha = 1.0
+            } else {
+                arBtn.isEnabled = false
+                arBtn.backgroundColor = .systemGray3
+                arBtn.alpha = 0.9
+            }
+        }
+        // 打开 AR 导航通知（供上层监听）
+        @objc func openAR() {
+            NotificationCenter.default.post(name: NSNotification.Name("OpenARNavigation"), object: nil)
         }
         // 定位按钮点击
         @objc func locateUser() {
@@ -215,7 +261,11 @@ struct AMapViewRepresentable: UIViewRepresentable {
         }
         // POI搜索回调
         func onPOISearchDone(_ request: AMapPOISearchBaseRequest!, response: AMapPOISearchResponse!) {
-            guard let poi = response.pois.first, let mapView = mapView else { return }
+            guard let mapView = mapView else { return }
+            guard let poi = response.pois.first else {
+                print("[地图] POI 搜索无结果")
+                return
+            }
             let dest = CLLocationCoordinate2D(latitude: CLLocationDegrees(poi.location.latitude), longitude: CLLocationDegrees(poi.location.longitude))
             DispatchQueue.main.async {
                 print("[地图] setCenter(POI搜索)前 center=\(mapView.centerCoordinate), 目标=\(dest), zoomLevel=\(mapView.zoomLevel)")
@@ -226,10 +276,25 @@ struct AMapViewRepresentable: UIViewRepresentable {
                 mapView.setNeedsDisplay()
                 print("[地图] setCenter(POI搜索)后 center=\(mapView.centerCoordinate), zoomLevel=\(mapView.zoomLevel)")
             }
-            // 弹出信息卡片
-            infoCardView.configure(title: poi.name, address: poi.address)
+            // 弹出信息卡片（自适应高度，显示距离等）
+            var distanceText: String? = nil
+            if let user = self.latestUserLocation ?? mapView.userLocation.location?.coordinate {
+                let u = CLLocation(latitude: user.latitude, longitude: user.longitude)
+                let d = CLLocation(latitude: dest.latitude, longitude: dest.longitude)
+                let meters = u.distance(from: d)
+                if meters >= 1000 {
+                    distanceText = String(format: "%.1f km", meters/1000)
+                } else {
+                    distanceText = String(format: "%.0f m", meters)
+                }
+            }
+            infoCardView.configure(title: poi.name, address: poi.address, distance: distanceText)
             infoCardView.isHidden = false
             currentDest = dest
+            // 切换了目的地，需要用户再次确认导航
+            navigationConfirmed = false
+            updateARButtonState()
+            // 保持只展示信息卡片，不主动绘制路线；等待用户点击“路线/导航”再规划
         }
         // 步行路线规划
         func searchWalkingRoute(from origin: CLLocationCoordinate2D, to destination: CLLocationCoordinate2D, on mapView: MAMapView) {
@@ -344,6 +409,21 @@ struct AMapViewRepresentable: UIViewRepresentable {
         func amapLocationManager(_ manager: AMapLocationManager!, doRequireLocationAuth locationManager: CLLocationManager!) {
             locationManager.requestWhenInUseAuthorization()
         }
+
+        // 直接弹出 AR 导航视图（避免重名，改名为 openARDirect）
+        @objc func openARDirect() {
+            guard let dest = currentDest else {
+                print("[AR] 无目的地，无法进入 AR 导航")
+                return
+            }
+            let top: UIViewController? = {
+                var root = UIApplication.shared.windows.first?.rootViewController
+                while let presented = root?.presentedViewController { root = presented }
+                return root
+            }()
+            let vc = UIHostingController(rootView: ARNavigationView(destination: dest))
+            top?.present(vc, animated: true)
+        }
     }
 }
 
@@ -402,6 +482,7 @@ class CustomSearchBarView: UIView, UITextFieldDelegate {
 class InfoCardView: UIView {
     private let titleLabel = UILabel()
     private let addressLabel = UILabel()
+    private let distanceLabel = UILabel()
     private let routeButton = UIButton(type: .system)
     var onRoute: (() -> Void)?
     override init(frame: CGRect) {
@@ -417,13 +498,16 @@ class InfoCardView: UIView {
         addressLabel.font = UIFont.systemFont(ofSize: 14)
         addressLabel.textColor = .darkGray
         addressLabel.numberOfLines = 2
+        distanceLabel.font = UIFont.systemFont(ofSize: 13)
+        distanceLabel.textColor = .gray
+        distanceLabel.numberOfLines = 1
         routeButton.setTitle("路线/导航", for: .normal)
         routeButton.titleLabel?.font = UIFont.boldSystemFont(ofSize: 16)
         routeButton.backgroundColor = UIColor.systemBlue
         routeButton.setTitleColor(.white, for: .normal)
         routeButton.layer.cornerRadius = 8
         routeButton.addTarget(self, action: #selector(routeTapped), for: .touchUpInside)
-        let stack = UIStackView(arrangedSubviews: [titleLabel, addressLabel, routeButton])
+        let stack = UIStackView(arrangedSubviews: [titleLabel, distanceLabel, addressLabel, routeButton])
         stack.axis = .vertical
         stack.spacing = 10
         stack.alignment = .leading
@@ -439,9 +523,11 @@ class InfoCardView: UIView {
         ])
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    func configure(title: String, address: String) {
+    func configure(title: String, address: String, distance: String? = nil) {
         titleLabel.text = title
         addressLabel.text = address
+        distanceLabel.text = distance
+        distanceLabel.isHidden = (distance == nil)
     }
     @objc private func routeTapped() {
         onRoute?()
