@@ -137,7 +137,8 @@ struct SegmentedRouteView: View {
                     destinationLocation: .constant(nil),
                     routeCoordinates: currentRouteData,
                     selectedPlaceIndex: .constant(0),
-                    startCoordinateBinding: .constant(nil)
+                    startCoordinateBinding: .constant(nil),
+                    isNavigationMode: .constant(false)
                 )
             }
         }

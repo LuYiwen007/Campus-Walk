@@ -32,6 +32,10 @@ struct MessageView: View {
     @State private var startCoordinate: CLLocationCoordinate2D? = nil
     @State private var destinationLocation: CLLocationCoordinate2D? = nil
     
+    // 新增：导航相关状态
+    @State private var isNavigationMode: Bool = false
+    @State private var showNavigationControls: Bool = false
+    
     // 主体视图，渲染聊天界面、消息列表、地图弹窗、输入区等
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -53,7 +57,8 @@ struct MessageView: View {
                         routeInfo: routeToShow,
                         destinationLocation: $destinationLocation,
                         selectedPlaceIndex: $selectedPlaceIndex,
-                        startCoordinateBinding: $startCoordinate
+                        startCoordinateBinding: $startCoordinate,
+                        isNavigationMode: $isNavigationMode
                     )
                     .ignoresSafeArea()
                     .transition(.opacity)
@@ -64,13 +69,40 @@ struct MessageView: View {
                         routeInfo: routeToShow,
                         destinationLocation: $destinationLocation,
                         selectedPlaceIndex: $selectedPlaceIndex,
-                        startCoordinateBinding: $startCoordinate
+                        startCoordinateBinding: $startCoordinate,
+                        isNavigationMode: $isNavigationMode
                     )
                     .ignoresSafeArea()
                     .transition(.opacity)
                 }
-                // 右下角按钮区：只保留聊天小圆圈
-                HStack(spacing: 16) {
+                // 右上角导航按钮
+                VStack {
+                    HStack {
+                        Spacer()
+                        // 导航模式切换按钮
+                        Button(action: {
+                            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                                isNavigationMode.toggle()
+                                showNavigationControls = isNavigationMode
+                            }
+                        }) {
+                            Image(systemName: isNavigationMode ? "location.fill" : "location")
+                                .foregroundColor(.white)
+                                .font(.system(size: 18, weight: .medium))
+                                .frame(width: 44, height: 44)
+                                .background(isNavigationMode ? Color.blue : Color.black.opacity(0.6))
+                                .clipShape(Circle())
+                                .shadow(radius: 2)
+                        }
+                        .padding(.trailing, 16)
+                        .padding(.top, 16)
+                    }
+                    Spacer()
+                }
+                
+                // 右下角聊天按钮
+                HStack {
+                    Spacer()
                     Button(action: {
                         withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                             isChatMinimized = false
@@ -80,7 +112,7 @@ struct MessageView: View {
                     }) {
                         Image(systemName: "bubble.left.and.bubble.right.fill")
                             .foregroundColor(.white)
-                            .font(.system(size: 23, weight: .bold))
+                            .font(.system(size: 20, weight: .bold))
                             .frame(width: 50, height: 50)
                             .background(Color.blue)
                             .clipShape(Circle())
@@ -89,7 +121,6 @@ struct MessageView: View {
                 }
                 .padding(.trailing, 17)
                 .padding(.bottom, 30)
-                .frame(maxWidth: .infinity, alignment: .trailing)
             }
             // 聊天主页面
             if showChat {

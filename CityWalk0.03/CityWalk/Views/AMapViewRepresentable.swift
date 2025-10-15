@@ -1,5 +1,5 @@
 import SwiftUI
-import MAMapKit
+import AMapNaviKit
 import AMapSearchKit
 import CoreLocation
 import AMapLocationKit
@@ -23,6 +23,11 @@ struct AMapViewRepresentable: UIViewRepresentable {
     // 新增：搜索回调
     var onSearch: ((String) -> Void)? = nil
     var showSearchBar: Bool = true
+    // 新增：导航相关属性
+    @StateObject private var navManager = CompleteNavigationManager.shared
+    var isNavigationMode: Bool = false
+    var onNavigationStart: (() -> Void)? = nil
+    var onNavigationStop: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -135,6 +140,12 @@ struct AMapViewRepresentable: UIViewRepresentable {
         ])
         // 优化指南针位置
         mapView.compassOrigin = CGPoint(x: container.bounds.width - 60, y: 80)
+        
+        // 添加导航控制按钮
+        if isNavigationMode {
+            addNavigationControls(to: container, coordinator: context.coordinator)
+        }
+        
         print("[AMap] makeUIView 结束，mapView=\(mapView)")
         return container
     }
@@ -176,6 +187,95 @@ struct AMapViewRepresentable: UIViewRepresentable {
         }
         print("[AMap] updateUIView 结束")
     }
+    
+    // MARK: - 导航控制方法
+    private func addNavigationControls(to container: UIView, coordinator: Coordinator) {
+        // 导航开始/停止按钮
+        let navButton = UIButton(type: .system)
+        navButton.setTitle("开始导航", for: .normal)
+        navButton.setTitle("停止导航", for: .selected)
+        navButton.backgroundColor = UIColor.systemBlue
+        navButton.setTitleColor(.white, for: .normal)
+        navButton.layer.cornerRadius = 25
+        navButton.titleLabel?.font = UIFont.systemFont(ofSize: 16, weight: .medium)
+        navButton.translatesAutoresizingMaskIntoConstraints = false
+        navButton.addTarget(coordinator, action: #selector(coordinator.toggleNavigation), for: .touchUpInside)
+        
+        container.addSubview(navButton)
+        NSLayoutConstraint.activate([
+            navButton.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            navButton.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -100),
+            navButton.widthAnchor.constraint(equalToConstant: 120),
+            navButton.heightAnchor.constraint(equalToConstant: 50)
+        ])
+        
+        coordinator.navButton = navButton
+        
+        // AR导航按钮
+        let arButton = UIButton(type: .system)
+        arButton.setTitle("AR导航", for: .normal)
+        arButton.backgroundColor = UIColor.systemGreen
+        arButton.setTitleColor(.white, for: .normal)
+        arButton.layer.cornerRadius = 25
+        arButton.titleLabel?.font = UIFont.systemFont(ofSize: 16, weight: .medium)
+        arButton.translatesAutoresizingMaskIntoConstraints = false
+        arButton.addTarget(coordinator, action: #selector(coordinator.startARNavigation), for: .touchUpInside)
+        
+        container.addSubview(arButton)
+        NSLayoutConstraint.activate([
+            arButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -20),
+            arButton.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -100),
+            arButton.widthAnchor.constraint(equalToConstant: 100),
+            arButton.heightAnchor.constraint(equalToConstant: 50)
+        ])
+        
+        coordinator.arNavButton = arButton
+        
+        // 导航信息面板
+        let navInfoPanel = UIView()
+        navInfoPanel.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        navInfoPanel.layer.cornerRadius = 12
+        navInfoPanel.translatesAutoresizingMaskIntoConstraints = false
+        navInfoPanel.isHidden = true
+        
+        let instructionLabel = UILabel()
+        instructionLabel.text = "准备开始导航..."
+        instructionLabel.textColor = .white
+        instructionLabel.font = UIFont.systemFont(ofSize: 16, weight: .medium)
+        instructionLabel.numberOfLines = 0
+        instructionLabel.translatesAutoresizingMaskIntoConstraints = false
+        
+        let distanceLabel = UILabel()
+        distanceLabel.text = "距离: --"
+        distanceLabel.textColor = .white
+        distanceLabel.font = UIFont.systemFont(ofSize: 14)
+        distanceLabel.translatesAutoresizingMaskIntoConstraints = false
+        
+        navInfoPanel.addSubview(instructionLabel)
+        navInfoPanel.addSubview(distanceLabel)
+        
+        NSLayoutConstraint.activate([
+            instructionLabel.topAnchor.constraint(equalTo: navInfoPanel.topAnchor, constant: 12),
+            instructionLabel.leadingAnchor.constraint(equalTo: navInfoPanel.leadingAnchor, constant: 16),
+            instructionLabel.trailingAnchor.constraint(equalTo: navInfoPanel.trailingAnchor, constant: -16),
+            
+            distanceLabel.topAnchor.constraint(equalTo: instructionLabel.bottomAnchor, constant: 8),
+            distanceLabel.leadingAnchor.constraint(equalTo: navInfoPanel.leadingAnchor, constant: 16),
+            distanceLabel.trailingAnchor.constraint(equalTo: navInfoPanel.trailingAnchor, constant: -16),
+            distanceLabel.bottomAnchor.constraint(equalTo: navInfoPanel.bottomAnchor, constant: -12)
+        ])
+        
+        container.addSubview(navInfoPanel)
+        NSLayoutConstraint.activate([
+            navInfoPanel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
+            navInfoPanel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
+            navInfoPanel.bottomAnchor.constraint(equalTo: navButton.topAnchor, constant: -16)
+        ])
+        
+        coordinator.navInfoPanel = navInfoPanel
+        coordinator.instructionLabel = instructionLabel
+        coordinator.distanceLabel = distanceLabel
+    }
 
     class Coordinator: NSObject, MAMapViewDelegate, AMapSearchDelegate, CustomSearchBarViewDelegate, AMapLocationManagerDelegate {
         var parent: AMapViewRepresentable
@@ -197,6 +297,15 @@ struct AMapViewRepresentable: UIViewRepresentable {
         // 新增：AR按钮与确认状态
         var arButton: UIButton?
         var navigationConfirmed: Bool = false
+        
+        // 新增：导航相关属性
+        var navButton: UIButton?
+        var arNavButton: UIButton?
+        var navInfoPanel: UIView?
+        var instructionLabel: UILabel?
+        var distanceLabel: UILabel?
+        var isNavigating: Bool = false
+        @StateObject private var navManager = CompleteNavigationManager.shared
         
         init(_ parent: AMapViewRepresentable) {
             self.parent = parent
@@ -423,6 +532,82 @@ struct AMapViewRepresentable: UIViewRepresentable {
             }()
             let vc = UIHostingController(rootView: ARNavigationView(destination: dest))
             top?.present(vc, animated: true)
+        }
+        
+        // MARK: - 导航控制方法
+        @objc func toggleNavigation() {
+            guard let destination = parent.destination else { return }
+            
+            if isNavigating {
+                // 停止导航
+                navManager.stopNavigation()
+                isNavigating = false
+                navButton?.setTitle("开始导航", for: .normal)
+                navButton?.isSelected = false
+                navInfoPanel?.isHidden = true
+                parent.onNavigationStop?()
+            } else {
+                // 开始导航
+                navManager.startNavigation(to: destination)
+                isNavigating = true
+                navButton?.setTitle("停止导航", for: .normal)
+                navButton?.isSelected = true
+                navInfoPanel?.isHidden = false
+                parent.onNavigationStart?()
+                
+                // 监听导航更新
+                setupNavigationObservers()
+            }
+        }
+        
+        @objc func startARNavigation() {
+            guard let destination = parent.destination else { return }
+            
+            // 停止当前导航
+            if isNavigating {
+                toggleNavigation()
+            }
+            
+            // 启动AR导航
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let window = windowScene.windows.first,
+               let rootVC = window.rootViewController {
+                let topVC = findTopViewController(from: rootVC)
+                let vc = UIHostingController(rootView: ARNavigationView(destination: destination))
+                topVC.present(vc, animated: true)
+            }
+        }
+        
+        private func findTopViewController(from viewController: UIViewController) -> UIViewController {
+            if let presented = viewController.presentedViewController {
+                return findTopViewController(from: presented)
+            }
+            if let navigationController = viewController as? UINavigationController {
+                return findTopViewController(from: navigationController.visibleViewController ?? navigationController)
+            }
+            if let tabController = viewController as? UITabBarController {
+                return findTopViewController(from: tabController.selectedViewController ?? tabController)
+            }
+            return viewController
+        }
+        
+        private func setupNavigationObservers() {
+            // 监听导航指令更新
+            NotificationCenter.default.addObserver(
+                forName: NSNotification.Name("NavigationInstructionUpdated"),
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self = self else { return }
+                
+                if let instruction = notification.userInfo?["instruction"] as? String {
+                    self.instructionLabel?.text = instruction
+                }
+                
+                if let distance = notification.userInfo?["distance"] as? Double {
+                    self.distanceLabel?.text = "距离: \(Int(distance))米"
+                }
+            }
         }
     }
 }

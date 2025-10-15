@@ -2,6 +2,9 @@ import SwiftUI
 import ARKit
 import RealityKit
 import CoreLocation
+import AMapFoundationKit
+import AMapSearchKit
+import AMapNaviKit
 
 // 识别的建筑数据结构
 struct DetectedBuilding: Identifiable {
@@ -24,15 +27,19 @@ struct DetectedBuilding: Identifiable {
 struct ARNavigationView: View {
     let destination: CLLocationCoordinate2D
     @StateObject private var navigationManager = CampusNavigationManager.shared
+    @StateObject private var navManager = CompleteNavigationManager.shared
     @State private var currentInstruction: String = "正在定位..."
     @State private var distanceToNext: Double = 0
     @State private var distanceToDestination: Double = 0
+    @State private var currentSpeed: Double = 0
+    @State private var currentRoadName: String = ""
     @Environment(\.presentationMode) var presentationMode
     
     // 识别模式相关状态
     @State private var isRecognitionModeEnabled: Bool = false
     @State private var detectedBuildings: [DetectedBuilding] = []
     @State private var currentDetectedBuilding: DetectedBuilding? = nil
+    @State private var showMapNavigation = false
 
     var body: some View {
         ARViewContainer(
@@ -43,18 +50,34 @@ struct ARNavigationView: View {
             currentDetectedBuilding: $currentDetectedBuilding
         )
         .ignoresSafeArea(.all)
-            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UpdateNavigationInstruction"))) { notification in
-                if let instruction = notification.userInfo?["instruction"] as? String {
-                    currentInstruction = instruction
-                }
-                if let distance = notification.userInfo?["distance"] as? Double {
-                    distanceToNext = distance
-                }
-                if let destDistance = notification.userInfo?["destinationDistance"] as? Double {
-                    distanceToDestination = destDistance
-                }
+        .onAppear {
+            // 开始导航
+            navManager.startNavigation(to: destination)
+        }
+        .onReceive(navManager.$currentInstruction) { instruction in
+            currentInstruction = instruction
+        }
+        .onReceive(navManager.$distanceToDestination) { distance in
+            distanceToDestination = distance
+        }
+        .onReceive(navManager.$currentSpeed) { speed in
+            currentSpeed = speed
+        }
+        .onReceive(navManager.$currentRoadName) { roadName in
+            currentRoadName = roadName
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UpdateNavigationInstruction"))) { notification in
+            if let instruction = notification.userInfo?["instruction"] as? String {
+                currentInstruction = instruction
             }
-            .overlay(
+            if let distance = notification.userInfo?["distance"] as? Double {
+                distanceToNext = distance
+            }
+            if let destDistance = notification.userInfo?["destinationDistance"] as? Double {
+                distanceToDestination = destDistance
+            }
+        }
+        .overlay(
                 ZStack {
                     VStack {
                         // 顶部状态栏
@@ -81,9 +104,16 @@ struct ARNavigationView: View {
                             
                             Spacer()
                             
-                            // 占位，保持居中
-                            Color.clear
-                                .frame(width: 24, height: 24)
+                            // 切换到地图导航按钮
+                            Button(action: {
+                                showMapNavigation = true
+                            }) {
+                                Image(systemName: "map.fill")
+                                    .font(.system(size: 24))
+                                    .foregroundColor(.white)
+                                    .background(Color.black.opacity(0.3))
+                                    .clipShape(Circle())
+                            }
                         }
                         .padding(.horizontal, 16)
                         .padding(.top, 8)
@@ -125,7 +155,14 @@ struct ARNavigationView: View {
                                         .font(.system(size: 18, weight: .semibold))
                                         .foregroundColor(.white)
                                     
-                                    // 距离信息
+                                    // 当前道路信息
+                                    if !currentRoadName.isEmpty {
+                                        Text("当前道路: \(currentRoadName)")
+                                            .font(.system(size: 14))
+                                            .foregroundColor(.white.opacity(0.8))
+                                    }
+                                    
+                                    // 距离和速度信息
                                     HStack(spacing: 20) {
                                         if distanceToNext > 0 {
                                             VStack(alignment: .leading, spacing: 2) {
@@ -144,6 +181,17 @@ struct ARNavigationView: View {
                                                     .font(.system(size: 12))
                                                     .foregroundColor(.white.opacity(0.7))
                                                 Text("\(Int(distanceToDestination))米")
+                                                    .font(.system(size: 16, weight: .medium))
+                                                    .foregroundColor(.white)
+                                            }
+                                        }
+                                        
+                                        if currentSpeed > 0 {
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text("当前速度")
+                                                    .font(.system(size: 12))
+                                                    .foregroundColor(.white.opacity(0.7))
+                                                Text("\(Int(currentSpeed)) km/h")
                                                     .font(.system(size: 16, weight: .medium))
                                                     .foregroundColor(.white)
                                             }
@@ -194,6 +242,9 @@ struct ARNavigationView: View {
                     }
                 }
             )
+        .sheet(isPresented: $showMapNavigation) {
+            MapNavigationView()
+        }
     }
 }
 
@@ -249,6 +300,7 @@ struct BuildingInfoCard: View {
 fileprivate struct ARViewContainer: UIViewRepresentable {
     let destination: CLLocationCoordinate2D
     let navigationManager: CampusNavigationManager
+    // let simpleNavManager: SimpleNavigationManager
     @Binding var isRecognitionModeEnabled: Bool
     @Binding var detectedBuildings: [DetectedBuilding]
     @Binding var currentDetectedBuilding: DetectedBuilding?
@@ -294,6 +346,7 @@ fileprivate struct ARViewContainer: UIViewRepresentable {
         private var arrowAnchor = AnchorEntity(.camera)
         private var arrowEntity = ModelEntity()
         private let navigationManager: CampusNavigationManager
+        // private let simpleNavManager: SimpleNavigationManager
 
         var destination: CLLocationCoordinate2D
         private var lastHeading: CLHeading?
@@ -307,12 +360,14 @@ fileprivate struct ARViewContainer: UIViewRepresentable {
         init(
             destination: CLLocationCoordinate2D, 
             navigationManager: CampusNavigationManager,
+            // simpleNavManager: SimpleNavigationManager,
             isRecognitionModeEnabled: Binding<Bool>,
             detectedBuildings: Binding<[DetectedBuilding]>,
             currentDetectedBuilding: Binding<DetectedBuilding?>
         ) {
             self.destination = destination
             self.navigationManager = navigationManager
+            // self.simpleNavManager = simpleNavManager
             self._isRecognitionModeEnabled = isRecognitionModeEnabled
             self._detectedBuildings = detectedBuildings
             self._currentDetectedBuilding = currentDetectedBuilding

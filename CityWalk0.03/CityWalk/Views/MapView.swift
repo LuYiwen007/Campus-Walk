@@ -16,6 +16,8 @@ struct MapView: View {
     // 新增：支持外部切换Place
     @Binding var selectedPlaceIndex: Int
     @Binding var startCoordinateBinding: CLLocationCoordinate2D?
+    // 新增：导航模式
+    @Binding var isNavigationMode: Bool
     
     // 已切换为高德地图，不再需要MapCameraPosition
     var body: some View {
@@ -24,9 +26,35 @@ struct MapView: View {
         return GeometryReader { geometry in
             ZStack(alignment: .bottom) {
                 // 用高德地图替换原有MapKit地图
-                AMapViewRepresentable(routeCoordinates: routeCoordinates, startCoordinate: startCoordinateBinding, destination: destinationLocation, centerCoordinate: centerCoordinate)
+                AMapViewRepresentable(
+                    routeCoordinates: routeCoordinates, 
+                    startCoordinate: startCoordinateBinding, 
+                    destination: destinationLocation, 
+                    centerCoordinate: centerCoordinate,
+                    isNavigationMode: isNavigationMode
+                )
                     .id(mapViewId)
                     .frame(width: geometry.size.width, height: geometry.size.height)
+                // 导航模式切换按钮
+                VStack {
+                    HStack {
+                        Spacer()
+                        Button(action: {
+                            isNavigationMode.toggle()
+                        }) {
+                            Image(systemName: isNavigationMode ? "location.fill" : "location")
+                                .font(.system(size: 20))
+                                .foregroundColor(.white)
+                                .frame(width: 44, height: 44)
+                                .background(isNavigationMode ? Color.blue : Color.gray.opacity(0.7))
+                                .clipShape(Circle())
+                        }
+                        .padding(.trailing, 16)
+                        .padding(.top, 16)
+                    }
+                    Spacer()
+                }
+                
                 // 右上角自定义定位按钮和底部分界线等UI保留
                 Rectangle()
                     .frame(height: 1)

@@ -10,7 +10,7 @@ import SwiftData
 import AMapFoundationKit
 import AMapSearchKit
 import AMapLocationKit
-import MAMapKit
+import AMapNaviKit
 
 // 新增AppDelegate类用于高德Key初始化
 class AppDelegate: NSObject, UIApplicationDelegate {
