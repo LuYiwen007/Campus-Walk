@@ -75,30 +75,6 @@ struct MessageView: View {
                     .ignoresSafeArea()
                     .transition(.opacity)
                 }
-                // 右上角导航按钮
-                VStack {
-                    HStack {
-                        Spacer()
-                        // 导航模式切换按钮
-                        Button(action: {
-                            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-                                isNavigationMode.toggle()
-                                showNavigationControls = isNavigationMode
-                            }
-                        }) {
-                            Image(systemName: isNavigationMode ? "location.fill" : "location")
-                                .foregroundColor(.white)
-                                .font(.system(size: 18, weight: .medium))
-                                .frame(width: 44, height: 44)
-                                .background(isNavigationMode ? Color.blue : Color.black.opacity(0.6))
-                                .clipShape(Circle())
-                                .shadow(radius: 2)
-                        }
-                        .padding(.trailing, 16)
-                        .padding(.top, 16)
-                    }
-                    Spacer()
-                }
                 
                 // 右下角聊天按钮
                 HStack {

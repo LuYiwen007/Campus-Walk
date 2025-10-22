@@ -336,7 +336,7 @@ class LocationDelegate: NSObject, CLLocationManagerDelegate, ObservableObject {
 // 辅助：高德POI搜索
 class AMapPOISearchHelper {
     static func searchPOI(keyword: String, completion: @escaping (CLLocationCoordinate2D?) -> Void) {
-        let apiKey = "d87559570133cb52b49cf4b0aa772ff0"
+        let apiKey = "ea6ffe534577fb90a8ce52a72c0aa121"
         let city = "广州"
         let encodedKeyword = keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         let urlString = "https://restapi.amap.com/v3/place/text?key=\(apiKey)&keywords=\(encodedKeyword)&city=\(city)&output=JSON&offset=1&page=1"

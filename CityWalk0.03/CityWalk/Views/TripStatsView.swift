@@ -14,7 +14,7 @@ struct TripStatsView: View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 // 上部地图
-                AMapViewRepresentable(routeCoordinates: routeCoordinates, startCoordinate: nil, destination: nil, showSearchBar: false)
+                AMapViewRepresentable(startCoordinate: nil, destination: nil, showSearchBar: false)
                     .frame(height: geometry.size.height * 0.45)
                     .clipped()
                 // 下部统计信息

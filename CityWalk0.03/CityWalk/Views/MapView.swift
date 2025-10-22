@@ -27,11 +27,10 @@ struct MapView: View {
             ZStack(alignment: .bottom) {
                 // 用高德地图替换原有MapKit地图
                 AMapViewRepresentable(
-                    routeCoordinates: routeCoordinates, 
                     startCoordinate: startCoordinateBinding, 
                     destination: destinationLocation, 
                     centerCoordinate: centerCoordinate,
-                    isNavigationMode: isNavigationMode
+                    showSearchBar: true
                 )
                     .id(mapViewId)
                     .frame(width: geometry.size.width, height: geometry.size.height)

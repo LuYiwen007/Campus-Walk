@@ -25,7 +25,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         MAMapView.updatePrivacyAgree(.didAgree)
         // 统一设置 Key 与 HTTPS
         AMapServices.shared().enableHTTPS = true
-        AMapServices.shared().apiKey = "4c6e7aa728f408e1fc754200f5bed2e4"
+        AMapServices.shared().apiKey = "ea6ffe534577fb90a8ce52a72c0aa121"
         return true
     }
 }
