@@ -126,10 +126,10 @@ struct TripView: View {
                                 .padding(.top, 36)
                                 // 日历视图
                                 CityWalkCalendarView(
-                                    year: 2025,
-                                    month: 7,
-                                    historyDays: [2,3,4,5], // mock: 这些天有CityWalk
-                                    selectedDay: 5 // mock: 当前高亮
+                                    year: Calendar.current.component(.year, from: Date()),
+                                    month: Calendar.current.component(.month, from: Date()),
+                                    historyDays: [], // 清空历史数据，不显示太阳图标
+                                    selectedDay: Calendar.current.component(.day, from: Date()) // 当前日期
                                 )    
                         }
                         // 历史行程
@@ -151,7 +151,7 @@ struct TripView: View {
                                         showStats = true
                                     })
                                     .onTapGesture {
-                                        selectedRoute = RouteDetailView_Previews.mockRoute
+                                        // 示例路线已移除，这里可以添加其他逻辑
                                     }
                                 }
                             }
@@ -345,7 +345,7 @@ struct RouteFullDetailView: View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 // 上部地图区域（2/5）
-                AMapViewRepresentable(routeCoordinates: nil, startCoordinate: nil, destination: nil, showSearchBar: false)
+                AMapViewRepresentable(startCoordinate: nil, destination: nil, showSearchBar: false)
                     .frame(height: geometry.size.height * 0.4)
                     .clipped()
 

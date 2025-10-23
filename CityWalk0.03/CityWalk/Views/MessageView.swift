@@ -32,6 +32,10 @@ struct MessageView: View {
     @State private var startCoordinate: CLLocationCoordinate2D? = nil
     @State private var destinationLocation: CLLocationCoordinate2D? = nil
     
+    // 新增：导航相关状态
+    @State private var isNavigationMode: Bool = false
+    @State private var showNavigationControls: Bool = false
+    
     // 主体视图，渲染聊天界面、消息列表、地图弹窗、输入区等
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -53,7 +57,8 @@ struct MessageView: View {
                         routeInfo: routeToShow,
                         destinationLocation: $destinationLocation,
                         selectedPlaceIndex: $selectedPlaceIndex,
-                        startCoordinateBinding: $startCoordinate
+                        startCoordinateBinding: $startCoordinate,
+                        isNavigationMode: $isNavigationMode
                     )
                     .ignoresSafeArea()
                     .transition(.opacity)
@@ -64,26 +69,16 @@ struct MessageView: View {
                         routeInfo: routeToShow,
                         destinationLocation: $destinationLocation,
                         selectedPlaceIndex: $selectedPlaceIndex,
-                        startCoordinateBinding: $startCoordinate
+                        startCoordinateBinding: $startCoordinate,
+                        isNavigationMode: $isNavigationMode
                     )
                     .ignoresSafeArea()
                     .transition(.opacity)
                 }
-                // 右下角按钮区：回到路线详情+聊天小圆圈
-                HStack(spacing: 16) {
-                    Button(action: {
-                        // 拉起路线详情
-                        routeToShow = "推荐路线"
-                        NotificationCenter.default.post(name: NSNotification.Name("ShowRouteDetailSheet"), object: nil)
-                    }) {
-                        Image(systemName: "list.bullet.rectangle")
-                            .font(.system(size: 23, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 50, height: 50)
-                            .background(Color.blue)
-                            .clipShape(Circle())
-                            .shadow(radius: 4)
-                    }
+                
+                // 右下角聊天按钮
+                HStack {
+                    Spacer()
                     Button(action: {
                         withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                             isChatMinimized = false
@@ -93,7 +88,7 @@ struct MessageView: View {
                     }) {
                         Image(systemName: "bubble.left.and.bubble.right.fill")
                             .foregroundColor(.white)
-                            .font(.system(size: 23, weight: .bold))
+                            .font(.system(size: 20, weight: .bold))
                             .frame(width: 50, height: 50)
                             .background(Color.blue)
                             .clipShape(Circle())
@@ -102,7 +97,6 @@ struct MessageView: View {
                 }
                 .padding(.trailing, 17)
                 .padding(.bottom, 30)
-                .frame(maxWidth: .infinity, alignment: .trailing)
             }
             // 聊天主页面
             if showChat {
@@ -238,6 +232,11 @@ struct MessageView: View {
                             imagePickerSource = .camera
                             showImagePicker = true
                         },
+                        .default(Text("AR 识别")) {
+                            // 打开 AR 识别入口
+                            let vc = UIHostingController(rootView: ARBuildingInfoView())
+                            UIApplication.shared.windows.first?.rootViewController?.present(vc, animated: true)
+                        },
                         .default(Text("从相册选择")) {
                             imagePickerSource = .photoLibrary
                             showImagePicker = true
@@ -287,6 +286,9 @@ struct MessageView: View {
                                 viewModel.sendImageMessage(data: data)
                             }
                         }
+                    }
+                    .sheet(isPresented: $viewModel.showSegmentedRoute) {
+                        SegmentedRouteView(conversationId: viewModel.currentConversationId)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
