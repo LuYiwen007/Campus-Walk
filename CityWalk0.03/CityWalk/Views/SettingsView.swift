@@ -10,7 +10,7 @@ struct SettingsView: View {
     
     // 主体视图，渲染所有设置项
     var body: some View {
-        NavigationView {
+        NavigationStack {
             List {
                 // 偏好设置分区
                 Section("偏好设置") {
@@ -82,6 +82,8 @@ struct SettingsView: View {
                     }
                 }
                 
+                
+                
                 // 关于分区
                 Section("关于") {
                     Button("隐私政策") {
@@ -142,7 +144,7 @@ struct PrivacyPolicyView: View {
     
     // 主体视图，显示隐私政策内容
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ScrollView {
                 Text("隐私政策内容...")
                     .padding()
@@ -162,7 +164,7 @@ struct TermsView: View {
     
     // 主体视图，显示服务条款内容
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ScrollView {
                 Text("服务条款内容...")
                     .padding()

@@ -336,7 +336,7 @@ class LocationDelegate: NSObject, CLLocationManagerDelegate, ObservableObject {
 // 辅助：高德POI搜索
 class AMapPOISearchHelper {
     static func searchPOI(keyword: String, completion: @escaping (CLLocationCoordinate2D?) -> Void) {
-        let apiKey = "d87559570133cb52b49cf4b0aa772ff0"
+        let apiKey = "ea6ffe534577fb90a8ce52a72c0aa121"
         let city = "广州"
         let encodedKeyword = keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         let urlString = "https://restapi.amap.com/v3/place/text?key=\(apiKey)&keywords=\(encodedKeyword)&city=\(city)&output=JSON&offset=1&page=1"
@@ -381,64 +381,4 @@ class AMapPOISearchHelper {
     }
 }
 
-// 预览和mock数据
-struct RouteDetailView_Previews: PreviewProvider {
-    static let mockRoute = Route(
-        title: "越秀公园1小时徒步路线",
-        author: "小明",
-        description: "广州是一座充满历史韵味和美食的城市。本次行程将带你领略老广的市井生活，品尝地道美食。",
-        places: [
-            Place(
-                name: "恒宝广场",
-                detail: "广州著名商圈，购物美食聚集地。",
-                imageName: "hengbao_square",
-                coordinate: CLLocationCoordinate2D(latitude: 23.1252, longitude: 113.2625),
-                nextCoordinate: CLLocationCoordinate2D(latitude: 23.1195, longitude: 113.2590)
-            ),
-            Place(
-                name: "广州永庆坊",
-                detail: "历史文化街区，感受老广州风情。",
-                imageName: "Yongqingfang",
-                coordinate: CLLocationCoordinate2D(latitude: 23.1195, longitude: 113.2590),
-                nextCoordinate: CLLocationCoordinate2D(latitude: 23.1280, longitude: 113.2437)
-            ),
-            Place(
-                name: "陈家祠堂",
-                detail: "岭南建筑代表，精美砖雕。",
-                imageName: "Chenjiacitang",
-                coordinate: CLLocationCoordinate2D(latitude: 23.1280, longitude: 113.2437),
-                nextCoordinate: CLLocationCoordinate2D(latitude: 23.1086, longitude: 113.2396)
-            ),
-            Place(
-                name: "沙面岛",
-                detail: "欧式建筑群，拍照圣地。",
-                imageName: "Shamian_island",
-                coordinate: CLLocationCoordinate2D(latitude: 23.1086, longitude: 113.2396),
-                nextCoordinate: CLLocationCoordinate2D(latitude: 23.1168, longitude: 113.2645)
-            ),
-            Place(
-                name: "广州石室耶稣圣心大教堂",
-                detail: "哥特式天主教堂，地标建筑。",
-                imageName: "St._church",
-                coordinate: CLLocationCoordinate2D(latitude: 23.1168, longitude: 113.2645),
-                nextCoordinate: CLLocationCoordinate2D(latitude: 23.1201, longitude: 113.2598)
-            ),
-            Place(
-                name: "赵记传承(一德路店)",
-                detail: "地道小吃，老字号。",
-                imageName: "Zhaoji",
-                coordinate: CLLocationCoordinate2D(latitude: 23.1201, longitude: 113.2598),
-                nextCoordinate: nil
-            )
-        ]
-    )
-    @State static var selectedPlaceIndex: Int = 0
-    static var previews: some View {
-        RouteDetailView(
-            route: mockRoute,
-            selectedPlaceIndex: .constant(0),
-            onPlaceChange: { _, _ in },
-            onSegmentChange: { _ in }
-        )
-    }
-} 
+// 预览和mock数据已移除 
