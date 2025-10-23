@@ -100,6 +100,168 @@ class ARPoiScan(Base):
     gmt_create: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+# 新增：建筑信息表
+class Building(Base):
+    __tablename__ = "buildings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=True)
+    latitude: Mapped[float] = mapped_column(String(32), nullable=False)
+    longitude: Mapped[float] = mapped_column(String(32), nullable=False)
+    address: Mapped[str] = mapped_column(String(512), default="")
+    building_type: Mapped[str] = mapped_column(String(64), default="unknown")
+    floor_count: Mapped[int] = mapped_column(Integer, default=0)
+    year_built: Mapped[int] = mapped_column(Integer, nullable=True)
+    architect: Mapped[str] = mapped_column(String(255), nullable=True)
+    style: Mapped[str] = mapped_column(String(128), nullable=True)
+    features: Mapped[dict] = mapped_column(JSON, default=dict)
+    images: Mapped[dict] = mapped_column(JSON, default=dict)
+    is_landmark: Mapped[bool] = mapped_column(Integer, default=0)
+    popularity_score: Mapped[float] = mapped_column(String(32), default="0.0")
+    gmt_create: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    gmt_modified: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# 新增：AR地标表
+class ARLandmark(Base):
+    __tablename__ = "ar_landmarks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    building_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    landmark_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    landmark_type: Mapped[str] = mapped_column(String(64), default="building")
+    ar_anchor_id: Mapped[str] = mapped_column(String(128), nullable=True)
+    position_x: Mapped[float] = mapped_column(String(32), nullable=True)
+    position_y: Mapped[float] = mapped_column(String(32), nullable=True)
+    position_z: Mapped[float] = mapped_column(String(32), nullable=True)
+    rotation_x: Mapped[float] = mapped_column(String(32), default="0")
+    rotation_y: Mapped[float] = mapped_column(String(32), default="0")
+    rotation_z: Mapped[float] = mapped_column(String(32), default="0")
+    scale_x: Mapped[float] = mapped_column(String(32), default="1.0")
+    scale_y: Mapped[float] = mapped_column(String(32), default="1.0")
+    scale_z: Mapped[float] = mapped_column(String(32), default="1.0")
+    is_active: Mapped[bool] = mapped_column(Integer, default=1)
+    gmt_create: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    gmt_modified: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# 新增：导航路线表
+class NavigationRoute(Base):
+    __tablename__ = "navigation_routes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    route_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    start_building_id: Mapped[int] = mapped_column(Integer, nullable=True)
+    end_building_id: Mapped[int] = mapped_column(Integer, nullable=True)
+    start_latitude: Mapped[float] = mapped_column(String(32), nullable=False)
+    start_longitude: Mapped[float] = mapped_column(String(32), nullable=False)
+    end_latitude: Mapped[float] = mapped_column(String(32), nullable=False)
+    end_longitude: Mapped[float] = mapped_column(String(32), nullable=False)
+    route_type: Mapped[str] = mapped_column(String(32), default="walking")
+    distance_meters: Mapped[int] = mapped_column(Integer, nullable=True)
+    estimated_time_seconds: Mapped[int] = mapped_column(Integer, nullable=True)
+    route_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    waypoints: Mapped[dict] = mapped_column(JSON, default=dict)
+    difficulty_level: Mapped[int] = mapped_column(Integer, default=1)
+    is_accessible: Mapped[bool] = mapped_column(Integer, default=1)
+    gmt_create: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    gmt_modified: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# 新增：用户AR会话表
+class UserARSession(Base):
+    __tablename__ = "user_ar_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    session_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    start_latitude: Mapped[float] = mapped_column(String(32), nullable=True)
+    start_longitude: Mapped[float] = mapped_column(String(32), nullable=True)
+    current_latitude: Mapped[float] = mapped_column(String(32), nullable=True)
+    current_longitude: Mapped[float] = mapped_column(String(32), nullable=True)
+    heading_degrees: Mapped[float] = mapped_column(String(32), nullable=True)
+    pitch_degrees: Mapped[float] = mapped_column(String(32), nullable=True)
+    roll_degrees: Mapped[float] = mapped_column(String(32), nullable=True)
+    device_info: Mapped[dict] = mapped_column(JSON, default=dict)
+    session_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    is_active: Mapped[bool] = mapped_column(Integer, default=1)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    ended_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    gmt_create: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    gmt_modified: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# 新增：AR识别记录表
+class ARRecognitionLog(Base):
+    __tablename__ = "ar_recognition_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    image_data: Mapped[bytes] = mapped_column(Text, nullable=True)
+    image_url: Mapped[str] = mapped_column(String(512), nullable=True)
+    recognized_building_id: Mapped[int] = mapped_column(Integer, nullable=True)
+    confidence_score: Mapped[float] = mapped_column(String(32), nullable=True)
+    recognition_method: Mapped[str] = mapped_column(String(32), default="vision")
+    processing_time_ms: Mapped[int] = mapped_column(Integer, nullable=True)
+    device_orientation: Mapped[str] = mapped_column(String(32), nullable=True)
+    lighting_conditions: Mapped[str] = mapped_column(String(32), nullable=True)
+    weather_conditions: Mapped[str] = mapped_column(String(32), nullable=True)
+    recognition_result: Mapped[dict] = mapped_column(JSON, default=dict)
+    is_correct: Mapped[bool] = mapped_column(Integer, nullable=True)
+    user_feedback: Mapped[str] = mapped_column(String(512), nullable=True)
+    gmt_create: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+# 新增：导航历史表
+class NavigationHistory(Base):
+    __tablename__ = "navigation_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    route_id: Mapped[int] = mapped_column(Integer, nullable=True)
+    start_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    end_time: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    total_distance_meters: Mapped[int] = mapped_column(Integer, nullable=True)
+    actual_duration_seconds: Mapped[int] = mapped_column(Integer, nullable=True)
+    navigation_points: Mapped[dict] = mapped_column(JSON, default=dict)
+    user_rating: Mapped[int] = mapped_column(Integer, nullable=True)
+    user_feedback: Mapped[str] = mapped_column(Text, nullable=True)
+    completion_status: Mapped[str] = mapped_column(String(32), default="in_progress")
+    gmt_create: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+# 新增：建筑特征表
+class BuildingFeature(Base):
+    __tablename__ = "building_features"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    building_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    feature_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    feature_data: Mapped[dict] = mapped_column(JSON, nullable=False)
+    model_version: Mapped[str] = mapped_column(String(32), nullable=True)
+    confidence_score: Mapped[float] = mapped_column(String(32), nullable=True)
+    gmt_create: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+# 新增：用户偏好表
+class UserPreference(Base):
+    __tablename__ = "user_preferences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    preferred_building_types: Mapped[dict] = mapped_column(JSON, default=dict)
+    preferred_route_types: Mapped[dict] = mapped_column(JSON, default=dict)
+    accessibility_needs: Mapped[dict] = mapped_column(JSON, default=dict)
+    language_preference: Mapped[str] = mapped_column(String(8), default="zh-CN")
+    ar_settings: Mapped[dict] = mapped_column(JSON, default=dict)
+    notification_settings: Mapped[dict] = mapped_column(JSON, default=dict)
+    gmt_create: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    gmt_modified: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 # 新增：模型版本管理
 class MLModelVersion(Base):
     __tablename__ = "ml_model_versions"

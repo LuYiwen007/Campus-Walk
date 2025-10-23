@@ -137,7 +137,8 @@ struct SegmentedRouteView: View {
                     destinationLocation: .constant(nil),
                     routeCoordinates: currentRouteData,
                     selectedPlaceIndex: .constant(0),
-                    startCoordinateBinding: .constant(nil)
+                    startCoordinateBinding: .constant(nil),
+                    isNavigationMode: .constant(false)
                 )
             }
         }
@@ -145,8 +146,9 @@ struct SegmentedRouteView: View {
     
     // 打开 AR 导航（把当前段坐标传入占位 AR 视图）
     private func openAR() {
-        // 这里传入当前段的坐标，若为空则不弹出
-        let vc = UIHostingController(rootView: ARNavigationView(routeCoordinates: currentRouteData))
+        // 使用当前段的终点作为 AR 目的地；若无则使用起点；若都无则不弹出
+        guard let dest = currentRouteData.last ?? currentRouteData.first else { return }
+        let vc = UIHostingController(rootView: ARNavigationView(destination: dest))
         UIApplication.shared.windows.first?.rootViewController?.present(vc, animated: true)
     }
     

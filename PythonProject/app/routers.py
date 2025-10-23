@@ -2,14 +2,19 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from .db import get_db, Base, engine
 from . import models, schemas
+from .ar_routers import router as ar_router
 import requests
 import json
+from datetime import datetime
 
 
 # 初始化数据库表
 Base.metadata.create_all(bind=engine)
 
 router = APIRouter()
+
+# 包含AR路由
+router.include_router(ar_router)
 
 
 @router.post("/conversations/add.json", response_model=schemas.CommonResp)

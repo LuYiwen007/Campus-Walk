@@ -253,7 +253,7 @@ struct LoginView: View {
     
     // 主体视图，渲染登录表单
     var body: some View {
-        NavigationView {
+        NavigationStack {
             Form {
                 Section {
                     TextField("用户名", text: $username)
@@ -307,7 +307,7 @@ struct RegisterView: View {
     
     // 主体视图，渲染注册表单
     var body: some View {
-        NavigationView {
+        NavigationStack {
             Form {
                 Section {
                     TextField("用户名", text: $username)

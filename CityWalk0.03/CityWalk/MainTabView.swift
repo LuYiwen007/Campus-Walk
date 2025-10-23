@@ -46,7 +46,7 @@ struct MainTabView: View {
                 TabBarButton(title: "新的旅程", systemImage: "bubble.left.and.bubble.right", selected: selectedTab == 1) {
                     withAnimation(.easeInOut(duration: 0.2)) { selectedTab = 1 }
                 }
-                Spacer()
+                    Spacer()
                 TabBarButton(title: "我的", systemImage: "suitcase", selected: selectedTab == 2) {
                     withAnimation(.easeInOut(duration: 0.2)) { selectedTab = 2 }
                 }
