@@ -88,7 +88,7 @@ struct AMapViewRepresentable: UIViewRepresentable {
             mapView.trailingAnchor.constraint(equalTo: container.trailingAnchor)
         ])
         
-        // 搜索框
+        // 搜索框 - 在导航时隐藏
         if showSearchBar {
             let searchView = CustomSearchBarView()
             searchView.delegate = context.coordinator
@@ -100,6 +100,9 @@ struct AMapViewRepresentable: UIViewRepresentable {
                 searchView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
                 searchView.heightAnchor.constraint(equalToConstant: 52)
             ])
+            
+            // 保存搜索框引用，以便在导航时隐藏
+            context.coordinator.searchView = searchView
         }
         
         // 定位按钮
@@ -161,8 +164,10 @@ struct AMapViewRepresentable: UIViewRepresentable {
     func updateUIView(_ uiView: UIView, context: Context) {
         guard let mapView = context.coordinator.mapView else { return }
         
-        // 清除现有覆盖层
-        mapView.removeOverlays(mapView.overlays)
+        // 只在非导航状态下清除覆盖层
+        if !context.coordinator.isNavigating {
+            mapView.removeOverlays(mapView.overlays)
+        }
         
         // 设置中心点
         if let start = startCoordinate {
@@ -192,51 +197,37 @@ struct AMapViewRepresentable: UIViewRepresentable {
         topInfoView.backgroundColor = UIColor.black.withAlphaComponent(0.9)
         topInfoView.translatesAutoresizingMaskIntoConstraints = false
         topInfoView.isHidden = true
-        
-        // 转向图标
-        let turnIconView = UIImageView()
-        turnIconView.contentMode = .scaleAspectFit
-        turnIconView.image = UIImage(systemName: "arrow.right")
-        turnIconView.tintColor = .white
-        turnIconView.translatesAutoresizingMaskIntoConstraints = false
-        topInfoView.addSubview(turnIconView)
-        
-        // 导航指令 - 合并距离和道路名称
+
+        // 导航指令
         let instructionLabel = UILabel()
-        instructionLabel.text = "200米后进入天府大道"
+        instructionLabel.text = "继续前行"
         instructionLabel.textColor = .white
         instructionLabel.font = UIFont.systemFont(ofSize: 16, weight: .medium)
         instructionLabel.numberOfLines = 1
         instructionLabel.translatesAutoresizingMaskIntoConstraints = false
         topInfoView.addSubview(instructionLabel)
-        
+
         container.addSubview(topInfoView)
-        
+
         NSLayoutConstraint.activate([
             // 顶部信息栏 - 紧贴顶部
             topInfoView.topAnchor.constraint(equalTo: container.topAnchor, constant: 0),
             topInfoView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 0),
             topInfoView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: 0),
             topInfoView.heightAnchor.constraint(equalToConstant: 60),
-            
-            // 转向图标
-            turnIconView.leadingAnchor.constraint(equalTo: topInfoView.leadingAnchor, constant: 16),
-            turnIconView.centerYAnchor.constraint(equalTo: topInfoView.centerYAnchor),
-            turnIconView.widthAnchor.constraint(equalToConstant: 24),
-            turnIconView.heightAnchor.constraint(equalToConstant: 24),
-            
+
             // 导航指令
-            instructionLabel.leadingAnchor.constraint(equalTo: turnIconView.trailingAnchor, constant: 12),
+            instructionLabel.leadingAnchor.constraint(equalTo: topInfoView.leadingAnchor, constant: 16),
             instructionLabel.centerYAnchor.constraint(equalTo: topInfoView.centerYAnchor),
             instructionLabel.trailingAnchor.constraint(equalTo: topInfoView.trailingAnchor, constant: -16)
         ])
-        
-        // 底部导航控制栏 - 深色背景，按照高德官方样式
+
+        // 底部导航控制栏 - 深色背景
         let bottomNavView = UIView()
         bottomNavView.backgroundColor = UIColor.black.withAlphaComponent(0.9)
         bottomNavView.translatesAutoresizingMaskIntoConstraints = false
         bottomNavView.isHidden = true
-        
+
         // 退出按钮
         let exitButton = UIButton(type: .system)
         exitButton.setTitle("退出", for: .normal)
@@ -246,7 +237,7 @@ struct AMapViewRepresentable: UIViewRepresentable {
         exitButton.titleLabel?.font = UIFont.systemFont(ofSize: 16, weight: .medium)
         exitButton.translatesAutoresizingMaskIntoConstraints = false
         exitButton.addTarget(coordinator, action: #selector(coordinator.exitNavigation), for: .touchUpInside)
-        
+
         // 剩余距离和时间
         let remainLabel = UILabel()
         remainLabel.text = "剩余 1.2公里 15分钟"
@@ -254,45 +245,29 @@ struct AMapViewRepresentable: UIViewRepresentable {
         remainLabel.font = UIFont.systemFont(ofSize: 16, weight: .medium)
         remainLabel.textAlignment = .center
         remainLabel.translatesAutoresizingMaskIntoConstraints = false
-        
-        // 设置按钮
-        let settingsButton = UIButton(type: .system)
-        settingsButton.setTitle("设置", for: .normal)
-        settingsButton.setTitleColor(.white, for: .normal)
-        settingsButton.backgroundColor = UIColor.gray.withAlphaComponent(0.6)
-        settingsButton.layer.cornerRadius = 8
-        settingsButton.titleLabel?.font = UIFont.systemFont(ofSize: 16, weight: .medium)
-        settingsButton.translatesAutoresizingMaskIntoConstraints = false
-        
+
         bottomNavView.addSubview(exitButton)
         bottomNavView.addSubview(remainLabel)
-        bottomNavView.addSubview(settingsButton)
         container.addSubview(bottomNavView)
-        
+
         NSLayoutConstraint.activate([
             // 底部信息栏 - 紧贴底部
             bottomNavView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 0),
             bottomNavView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: 0),
             bottomNavView.bottomAnchor.constraint(equalTo: container.safeAreaLayoutGuide.bottomAnchor, constant: 0),
             bottomNavView.heightAnchor.constraint(equalToConstant: 60),
-            
+
             // 退出按钮
             exitButton.leadingAnchor.constraint(equalTo: bottomNavView.leadingAnchor, constant: 16),
             exitButton.centerYAnchor.constraint(equalTo: bottomNavView.centerYAnchor),
             exitButton.widthAnchor.constraint(equalToConstant: 60),
             exitButton.heightAnchor.constraint(equalToConstant: 36),
-            
+
             // 剩余信息
             remainLabel.centerXAnchor.constraint(equalTo: bottomNavView.centerXAnchor),
-            remainLabel.centerYAnchor.constraint(equalTo: bottomNavView.centerYAnchor),
-            
-            // 设置按钮
-            settingsButton.trailingAnchor.constraint(equalTo: bottomNavView.trailingAnchor, constant: -16),
-            settingsButton.centerYAnchor.constraint(equalTo: bottomNavView.centerYAnchor),
-            settingsButton.widthAnchor.constraint(equalToConstant: 60),
-            settingsButton.heightAnchor.constraint(equalToConstant: 36)
+            remainLabel.centerYAnchor.constraint(equalTo: bottomNavView.centerYAnchor)
         ])
-        
+
         coordinator.topInfoView = topInfoView
         coordinator.instructionLabel = instructionLabel
         coordinator.bottomNavView = bottomNavView
@@ -315,6 +290,7 @@ struct AMapViewRepresentable: UIViewRepresentable {
         var arButton: UIButton?
         
         // 导航UI
+        var searchView: CustomSearchBarView?
         var topInfoView: UIView?
         var instructionLabel: UILabel?
         var bottomNavView: UIView?
@@ -528,23 +504,15 @@ struct AMapViewRepresentable: UIViewRepresentable {
         private func hideNonNavigationUI() {
             infoCardView.isHidden = true
             // 隐藏搜索框
-            for subview in mapView?.subviews ?? [] {
-                if subview is CustomSearchBarView {
-                    subview.isHidden = true
-                    print("🔍 [UI] 隐藏搜索栏")
-                }
-            }
+            searchView?.isHidden = true
+            print("🔍 [UI] 隐藏搜索栏")
         }
         
         // 显示非导航UI
         private func showNonNavigationUI() {
             // 显示搜索框
-            for subview in mapView?.subviews ?? [] {
-                if subview is CustomSearchBarView {
-                    subview.isHidden = false
-                    print("🔍 [UI] 显示搜索栏")
-                }
-            }
+            searchView?.isHidden = false
+            print("🔍 [UI] 显示搜索栏")
         }
         
         // 更新导航信息
@@ -584,7 +552,7 @@ struct AMapViewRepresentable: UIViewRepresentable {
             }
         }
         
-        // 绘制导航路线
+        // 绘制导航路线 - 使用真实路线规划
         private func drawNavigationRoute(to destination: CLLocationCoordinate2D) {
             guard let mapView = mapView,
                   let currentLocation = mapView.userLocation?.coordinate else {
@@ -592,46 +560,20 @@ struct AMapViewRepresentable: UIViewRepresentable {
                 return
             }
             
-            print("🗺️ [导航] 绘制路线: \(currentLocation) -> \(destination)")
+            print("🗺️ [导航] 开始真实路线规划: \(currentLocation) -> \(destination)")
             
             // 清除之前的路线
             mapView.removeOverlays(mapView.overlays)
             
-            // 创建路线坐标数组
-            var coordinates = [currentLocation, destination]
+            // 使用高德地图API进行真实路线规划
+            let request = AMapWalkingRouteSearchRequest()
+            request.origin = AMapGeoPoint.location(withLatitude: CGFloat(currentLocation.latitude), longitude: CGFloat(currentLocation.longitude))
+            request.destination = AMapGeoPoint.location(withLatitude: CGFloat(destination.latitude), longitude: CGFloat(destination.longitude))
             
-            // 创建折线
-            let polyline = MAPolyline(coordinates: &coordinates, count: UInt(coordinates.count))
-            polyline?.title = "导航路线"
+            // 执行路线搜索
+            search?.aMapWalkingRouteSearch(request)
             
-            // 添加到地图
-            mapView.add(polyline)
-            
-            // 强制刷新地图
-            mapView.setNeedsDisplay()
-            
-            print("✅ [导航] 路线已添加到地图，坐标数量: \(coordinates.count)")
-            print("📍 [导航] 起点: \(currentLocation)")
-            print("📍 [导航] 终点: \(destination)")
-            
-            // 设置地图区域以显示整条路线
-            let minLat = min(currentLocation.latitude, destination.latitude)
-            let maxLat = max(currentLocation.latitude, destination.latitude)
-            let minLon = min(currentLocation.longitude, destination.longitude)
-            let maxLon = max(currentLocation.longitude, destination.longitude)
-            
-            let centerLat = (minLat + maxLat) / 2
-            let centerLon = (minLon + maxLon) / 2
-            let spanLat = max(maxLat - minLat, 0.01) * 1.2 // 添加一些边距
-            let spanLon = max(maxLon - minLon, 0.01) * 1.2
-            
-            let region = MACoordinateRegion(
-                center: CLLocationCoordinate2D(latitude: centerLat, longitude: centerLon),
-                span: MACoordinateSpan(latitudeDelta: spanLat, longitudeDelta: spanLon)
-            )
-            mapView.setRegion(region, animated: true)
-            
-            print("✅ [导航] 路线绘制完成")
+            print("✅ [导航] 已请求真实路线规划")
         }
         
         // 跳转到起始位置
@@ -644,19 +586,13 @@ struct AMapViewRepresentable: UIViewRepresentable {
             
             print("📍 [导航] 跳转到起始位置: \(currentLocation)")
             
-            // 确保用户位置显示
-            mapView.showsUserLocation = true
-            
             // 设置地图中心为当前位置
             mapView.setCenter(currentLocation, animated: true)
             
-            // 设置合适的缩放级别
-            mapView.setZoomLevel(16, animated: true)
+            // 设置合适的缩放级别 - 稍微放大一点以便看到路线
+            mapView.setZoomLevel(15, animated: true)
             
-            // 启用用户位置跟踪和朝向指示器
-            mapView.userTrackingMode = .followWithHeading // 启用朝向指示器
-            
-            print("✅ [导航] 已跳转到起始位置")
+            print("✅ [导航] 已跳转到起始位置，缩放级别: 15")
         }
         
         // AR导航
@@ -674,8 +610,8 @@ struct AMapViewRepresentable: UIViewRepresentable {
             if let polyline = overlay as? MAPolyline {
                 let renderer = MAPolylineRenderer(polyline: polyline)
                 renderer?.strokeColor = UIColor.systemBlue
-                renderer?.lineWidth = 8.0 // 增加线宽使其更明显
-                print("🎨 [路线渲染] 创建路线渲染器，线宽: 8.0，颜色: 蓝色")
+                renderer?.lineWidth = 10.0 // 进一步增加线宽
+                print("🎨 [路线渲染] 创建路线渲染器，线宽: 10.0，颜色: 蓝色")
                 return renderer
             }
             return nil
