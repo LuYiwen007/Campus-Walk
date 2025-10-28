@@ -19,6 +19,11 @@ struct MapView: View {
     // 新增：导航模式
     @Binding var isNavigationMode: Bool
     
+    // 高德导航相关状态
+    @StateObject private var walkNavManager = WalkingNavigationManager.shared
+    @State private var showAMapNavigation = false
+    @State private var navigationDestination: CLLocationCoordinate2D? = nil
+    
     // 已切换为高德地图，不再需要MapCameraPosition
     var body: some View {
         let _ = print("[MapView] startCoordinateBinding=\(String(describing: startCoordinateBinding)), destinationLocation=\(String(describing: destinationLocation))")
@@ -39,7 +44,17 @@ struct MapView: View {
                     HStack {
                         Spacer()
                         Button(action: {
-                            isNavigationMode.toggle()
+                            if isNavigationMode {
+                                // 如果已经在导航模式，启动高德导航
+                                if let destination = destinationLocation {
+                                    navigationDestination = destination
+                                    showAMapNavigation = true
+                                    walkNavManager.startWalkingNavigation(to: destination)
+                                }
+                            } else {
+                                // 切换导航模式
+                                isNavigationMode.toggle()
+                            }
                         }) {
                             Image(systemName: isNavigationMode ? "location.fill" : "location")
                                 .font(.system(size: 20))
@@ -60,6 +75,23 @@ struct MapView: View {
                     .foregroundColor(Color(.systemGray4))
                     .frame(maxHeight: .infinity, alignment: .bottom)
                     .allowsHitTesting(false)
+            }
+        }
+        .sheet(isPresented: $showAMapNavigation) {
+            if let destination = navigationDestination {
+                AMapNaviWalkViewRepresentable(
+                    isNavigating: $walkNavManager.isNavigating,
+                    destination: destination,
+                    onNavigationStart: {
+                        print("🚀 [MapView] 高德导航开始")
+                    },
+                    onNavigationStop: {
+                        print("🛑 [MapView] 高德导航停止")
+                        showAMapNavigation = false
+                        isNavigationMode = false
+                    }
+                )
+                .ignoresSafeArea()
             }
         }
         .onAppear {

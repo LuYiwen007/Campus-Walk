@@ -19,7 +19,7 @@ struct AMapViewRepresentable: UIViewRepresentable {
     var showSearchBar: Bool = true
     
     // 导航相关
-    @StateObject private var walkNavManager = SimpleNavigationManager.shared
+    @StateObject private var walkNavManager = WalkingNavigationManager.shared
     var onNavigationStart: (() -> Void)? = nil
     var onNavigationStop: (() -> Void)? = nil
 
@@ -152,8 +152,11 @@ struct AMapViewRepresentable: UIViewRepresentable {
             infoCard.bottomAnchor.constraint(equalTo: container.safeAreaLayoutGuide.bottomAnchor, constant: -16)
         ])
         
-        // 导航UI
+        // 导航UI - 在原地图界面添加导航功能
         addNavigationUI(to: container, coordinator: context.coordinator)
+        
+        // 添加导航视图到地图容器
+        addNavigationViewToMap(container: container, coordinator: context.coordinator)
         
         return container
     }
@@ -300,7 +303,40 @@ struct AMapViewRepresentable: UIViewRepresentable {
         coordinator.remainLabel = remainLabel
     }
 
-    class Coordinator: NSObject, MAMapViewDelegate, AMapSearchDelegate, CustomSearchBarViewDelegate, AMapLocationManagerDelegate {
+    // MARK: - 在原地图界面添加导航功能
+    private func addNavigationViewToMap(container: UIView, coordinator: Coordinator) {
+        // 创建高德导航视图，但不立即显示
+        let walkView = AMapNaviWalkView()
+        walkView.delegate = coordinator
+        walkView.showUIElements = true
+        walkView.showBrowseRouteButton = true
+        walkView.showMoreButton = true
+        walkView.showMode = .carPositionLocked
+        walkView.trackingMode = .mapNorth
+        walkView.isHidden = true // 初始隐藏
+        
+        // 确保导航视图配置正确
+        walkView.backgroundColor = UIColor.clear
+        walkView.isOpaque = false
+        
+        // 添加到地图容器
+        container.addSubview(walkView)
+        walkView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            walkView.topAnchor.constraint(equalTo: container.topAnchor),
+            walkView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            walkView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            walkView.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
+        
+        // 保存引用
+        coordinator.navigationView = walkView
+        
+        print("✅ [导航] 导航视图已添加到地图容器")
+        print("🔍 [导航] 导航视图配置: showUIElements=\(walkView.showUIElements), showMode=\(walkView.showMode.rawValue)")
+    }
+
+    class Coordinator: NSObject, MAMapViewDelegate, AMapSearchDelegate, CustomSearchBarViewDelegate, AMapLocationManagerDelegate, AMapNaviWalkViewDelegate {
         var parent: AMapViewRepresentable
         var search: AMapSearchAPI?
         var mapView: MAMapView?
@@ -322,11 +358,19 @@ struct AMapViewRepresentable: UIViewRepresentable {
         var remainLabel: UILabel?
         var isNavigating: Bool = false
         
+        // 路线数据存储
+        var currentRouteDistance: Double?
+        var currentRouteDuration: Double?
+        
+        // 高德导航视图引用
+        var navigationView: AMapNaviWalkView?
+        
         init(_ parent: AMapViewRepresentable) {
             self.parent = parent
             super.init()
             self.search = AMapSearchAPI()
             self.search?.delegate = self
+            print("🔍 [地图API] 搜索API已初始化，代理已设置")
             infoCardView.isHidden = true
             infoCardView.onRoute = { [weak self] in
                 guard let self = self, let dest = self.currentDest else { return }
@@ -455,67 +499,490 @@ struct AMapViewRepresentable: UIViewRepresentable {
             }
         }
         
-        // 开始步行导航
-        func startWalkingNavigation(to destination: CLLocationCoordinate2D) {
-            guard !isNavigating else { return }
+        // MARK: - 地图视图查找辅助方法
+        
+        /// 深度搜索地图视图
+        func findMapView(in view: UIView) -> MAMapView? {
+            // 首先检查当前视图
+            if let mapView = view as? MAMapView {
+                return mapView
+            }
             
-            print("🚶 [步行导航] 开始导航到: \(destination)")
+            // 递归搜索所有子视图
+            for subview in view.subviews {
+                if let mapView = findMapView(in: subview) {
+                    return mapView
+                }
+            }
             
-            // 确保在主线程上执行
-            DispatchQueue.main.async {
-                self.isNavigating = true
-                
-                // 隐藏搜索框和信息卡片
-                self.hideNonNavigationUI()
-                
-                // 显示导航UI
-                self.showNavigationUI()
-                
-                // 绘制导航路线
-                self.drawNavigationRoute(to: destination)
-                
-                // 跳转到起始位置
-                self.jumpToStartLocation()
-                
-                // 启动步行导航 - 添加延迟确保UI更新完成
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    self.parent.walkNavManager.startWalkingNavigation(to: destination)
-                    
-                    // 启动导航信息更新定时器
-                    self.startNavigationTimer()
-                    
-                    self.parent.onNavigationStart?()
+            return nil
+        }
+        
+        /// 调试视图层次结构
+        func debugViewHierarchy(_ view: UIView, level: Int) {
+            let indent = String(repeating: "  ", count: level)
+            print("\(indent)\(type(of: view)): \(view.frame)")
+            
+            for subview in view.subviews {
+                debugViewHierarchy(subview, level: level + 1)
+            }
+        }
+        
+        /// 尝试直接设置地图中心
+        func tryDirectSetMapCenter(_ walkView: AMapNaviWalkView, centerCoordinate: CLLocationCoordinate2D) {
+            print("🗺️ [高德导航] 尝试直接设置地图中心: \(centerCoordinate)")
+            
+            // 由于AMapNaviWalkView没有直接的setCenter方法，我们尝试其他方式
+            print("⚠️ [高德导航] AMapNaviWalkView 不支持直接设置中心")
+            
+            // 尝试使用高德导航管理器的路线规划回调来设置位置
+            print("🔄 [高德导航] 尝试通过路线规划回调设置位置")
+            self.setMapCenterViaRoutePlanning(centerCoordinate: centerCoordinate)
+            
+            // 尝试延迟再次搜索地图视图
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                print("🔄 [高德导航] 延迟3秒后再次尝试查找地图视图")
+                if let mapView = self.findMapView(in: walkView) {
+                    let region = MACoordinateRegion(
+                        center: centerCoordinate,
+                        span: MACoordinateSpan(latitudeDelta: 0.1, longitudeDelta: 0.1)
+                    )
+                    mapView.setRegion(region, animated: true)
+                    print("✅ [高德导航] 延迟设置地图区域成功")
+                } else {
+                    print("❌ [高德导航] 延迟后仍然无法找到地图视图")
                 }
             }
         }
         
-        // 退出导航
+        /// 通过路线规划回调设置地图中心
+        func setMapCenterViaRoutePlanning(centerCoordinate: CLLocationCoordinate2D) {
+            // 这个方法会在路线规划成功后自动调用
+            print("🗺️ [高德导航] 将通过路线规划回调设置地图中心: \(centerCoordinate)")
+        }
+        
+        // 开始步行导航 - 在原地图界面实现导航功能
+        func startWalkingNavigation(to destination: CLLocationCoordinate2D) {
+            guard !isNavigating else { return }
+            
+            print("🚶 [步行导航] 开始导航到: \(destination)")
+            print("🔍 [调试] 当前地图视图状态: \(mapView != nil ? "已初始化" : "未初始化")")
+            print("🔍 [调试] 当前导航视图状态: \(navigationView != nil ? "已初始化" : "未初始化")")
+            
+            // 确保在主线程上执行
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { 
+                    print("❌ [调试] self为nil，退出导航")
+                    return 
+                }
+                
+                self.isNavigating = true
+                print("✅ [导航] 导航状态已设置为true")
+                
+                // 隐藏搜索框和信息卡片
+                self.hideNonNavigationUI()
+                print("✅ [导航] 非导航UI已隐藏")
+                
+                // 启动WalkingNavigationManager（使用地图API路线规划）
+                self.parent.walkNavManager.startWalkingNavigation(to: destination)
+                
+                // 在原地图界面启用导航视图
+                self.enableNavigationOnMap(destination: destination)
+                
+                // 显示导航信息面板
+                self.showNavigationInfoPanel()
+                
+                // 使用地图API进行路线规划
+                self.calculateRouteUsingAMapAPI(to: destination)
+                    
+                print("✅ [导航] 导航已在地图界面启动")
+                print("🔍 [调试] 导航视图可见性: \(self.navigationView?.isHidden == false ? "可见" : "隐藏")")
+                print("🔍 [调试] 地图用户位置: \(self.mapView?.showsUserLocation == true ? "已启用" : "未启用")")
+                    
+                    self.parent.onNavigationStart?()
+                }
+            }
+        
+        // 使用高德地图API进行路线规划，避免导航SDK崩溃
+        private func calculateRouteUsingAMapAPI(to destination: CLLocationCoordinate2D) {
+            print("🗺️ [地图API] 开始使用高德地图API进行路线规划")
+            
+            guard let mapView = mapView,
+                  let currentLocation = mapView.userLocation?.coordinate else {
+                print("❌ [地图API] 无法获取当前位置")
+                return
+            }
+            
+            // 检查搜索API是否可用
+            guard let searchAPI = search else {
+                print("❌ [地图API] 搜索API未初始化")
+                return
+            }
+            
+            print("🔍 [地图API] 当前位置: \(currentLocation)")
+            print("🔍 [地图API] 目标位置: \(destination)")
+            
+            // 使用高德地图搜索API进行路线规划
+            let request = AMapWalkingRouteSearchRequest()
+            request.origin = AMapGeoPoint.location(withLatitude: CGFloat(currentLocation.latitude), 
+                                                 longitude: CGFloat(currentLocation.longitude))
+            request.destination = AMapGeoPoint.location(withLatitude: CGFloat(destination.latitude), 
+                                                        longitude: CGFloat(destination.longitude))
+            
+            print("🔍 [地图API] 请求起点: \(request.origin?.description ?? "nil")")
+            print("🔍 [地图API] 请求终点: \(request.destination?.description ?? "nil")")
+            
+            // 确保导航UI已初始化
+            if self.remainLabel == nil {
+                print("⚠️ [地图API] remainLabel未初始化，无法显示距离信息")
+                print("🔍 [地图API] 当前remainLabel状态: \(self.remainLabel != nil ? "已初始化" : "未初始化")")
+            }
+            
+            // 立即使用备用方案计算距离（确保有数据显示）
+            self.fallbackDistanceCalculation(from: currentLocation, to: destination)
+            
+            // 同时尝试API调用
+            searchAPI.aMapWalkingRouteSearch(request)
+            print("✅ [地图API] 路线规划请求已发送")
+            
+            // 添加超时检查
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+                print("⏰ [地图API] 路线搜索超时检查（5秒后）")
+            }
+        }
+        
+        // 备用距离计算方案 - 当API调用失败时使用
+        private func fallbackDistanceCalculation(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) {
+            print("🔄 [备用方案] 开始计算直线距离")
+            print("🔍 [备用方案] 起点坐标: \(start)")
+            print("🔍 [备用方案] 终点坐标: \(end)")
+            
+            let startLocation = CLLocation(latitude: start.latitude, longitude: start.longitude)
+            let endLocation = CLLocation(latitude: end.latitude, longitude: end.longitude)
+            
+            let distance = startLocation.distance(from: endLocation)
+            let walkingTime = Int(distance / 1.4) // 假设步行速度1.4米/秒
+            
+            print("📏 [备用方案] 直线距离: \(Int(distance))米, 预计步行时间: \(walkingTime)秒")
+            print("🔍 [备用方案] remainLabel状态: \(remainLabel != nil ? "已初始化" : "未初始化")")
+            
+            // 更新UI显示
+            DispatchQueue.main.async {
+                print("🔍 [备用方案] 开始更新UI显示")
+                self.updateNavigationInfoWithRouteData(distance: distance, duration: Double(walkingTime))
+                print("🔍 [备用方案] UI更新完成")
+            }
+        }
+        
+        // 显示基本导航信息 - 逐步恢复高德导航功能的安全方案
+        private func showBasicNavigationInfo(destination: CLLocationCoordinate2D) {
+            print("📍 [基本导航] 开始显示基本导航信息（逐步恢复模式）")
+            
+            // 显示导航UI
+            showNavigationUI()
+            
+            // 第三步：恢复路线绘制功能
+            print("🔍 [调试] 开始绘制导航路线")
+            drawNavigationRoute(to: destination)
+            print("🔍 [调试] 导航路线绘制完成")
+            
+            print("🔍 [调试] 开始跳转到起始位置")
+            jumpToStartLocation()
+            print("🔍 [调试] 跳转到起始位置完成")
+            
+            // 第三步：恢复定时器功能
+            print("🔍 [调试] 开始恢复导航定时器（第三步）")
+            startNavigationTimer()
+            print("🔍 [调试] 导航定时器恢复完成（第三步）")
+            
+            print("✅ [基本导航] 基本导航信息显示完成（逐步恢复高德导航功能）")
+        }
+        
+        // 在原地图界面启用导航
+        private func enableNavigationOnMap(destination: CLLocationCoordinate2D) {
+            print("🗺️ [导航] 在原地图界面启用导航")
+            
+            // 确保导航视图在最上层
+            if let navigationView = navigationView {
+                navigationView.superview?.bringSubviewToFront(navigationView)
+                navigationView.isHidden = false
+                print("✅ [导航] 导航视图已显示并置于最上层")
+            }
+            
+            // 确保地图显示用户位置
+            mapView?.showsUserLocation = true
+            mapView?.userTrackingMode = .followWithHeading
+            mapView?.userLocation.title = "我的位置"
+            mapView?.userLocation.subtitle = "当前位置"
+            print("✅ [导航] 地图用户位置已启用")
+            
+            // 强制刷新用户位置显示
+            mapView?.setNeedsDisplay()
+            
+            // 延迟添加导航视图到管理器，避免初始化冲突
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if let walkManager = self.parent.walkNavManager.getWalkManager(),
+                   let navigationView = self.navigationView {
+                    walkManager.addDataRepresentative(navigationView)
+                    print("✅ [导航] 导航视图已添加到管理器")
+                    
+                    // 启动GPS导航（不进行路线规划，避免崩溃）
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        walkManager.startGPSNavi()
+                        print("🚀 [导航] 已启动GPS导航")
+                    }
+                }
+            }
+            
+            // 设置地图中心位置
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                if let currentLocation = self.mapView?.userLocation?.coordinate {
+                    let centerCoordinate = CLLocationCoordinate2D(
+                        latitude: (currentLocation.latitude + destination.latitude) / 2,
+                        longitude: (currentLocation.longitude + destination.longitude) / 2
+                    )
+                    
+                    let distance = CLLocation(latitude: currentLocation.latitude, longitude: currentLocation.longitude)
+                        .distance(from: CLLocation(latitude: destination.latitude, longitude: destination.longitude))
+                    
+                    let latitudinalMeters = max(distance * 1.5, 10000)
+                    let longitudinalMeters = max(distance * 1.5, 10000)
+                    
+                    let region = MACoordinateRegion(
+                        center: centerCoordinate,
+                        span: MACoordinateSpan(
+                            latitudeDelta: latitudinalMeters / 111000,
+                            longitudeDelta: longitudinalMeters / 111000
+                        )
+                    )
+                    
+                    // 设置地图区域
+                    if let mapView = self.findMapView(in: self.navigationView ?? UIView()) {
+                        mapView.setRegion(region, animated: true)
+                        print("✅ [导航] 地图已跳转到正确位置: \(centerCoordinate)")
+                    }
+                }
+            }
+        }
+        
+        // 显示导航信息面板
+        private func showNavigationInfoPanel() {
+            print("📱 [导航] 显示导航信息面板")
+            
+            // 显示顶部和底部导航面板
+            topInfoView?.isHidden = false
+            bottomNavView?.isHidden = false
+            
+            // 确保导航面板在最上层
+            topInfoView?.superview?.bringSubviewToFront(topInfoView!)
+            bottomNavView?.superview?.bringSubviewToFront(bottomNavView!)
+            
+            // 初始化导航信息显示
+            updateNavigationInfo()
+            
+            // 启动导航信息更新
+            startNavigationTimer()
+            
+            print("✅ [导航] 导航信息面板已显示")
+        }
+        
+        // 显示高德导航界面 - 修复用户位置和路线显示问题
+        private func showAMapNavigationView(destination: CLLocationCoordinate2D) {
+            print("🗺️ [高德导航] 开始显示高德导航界面")
+            
+            // 确保在主线程执行
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                
+                // 检查是否已经在导航状态
+                guard self.isNavigating else {
+                    print("⚠️ [高德导航] 不在导航状态，跳过显示")
+                    return
+                }
+                
+                // 隐藏原有地图视图，让高德导航界面完全接管
+                self.mapView?.isHidden = true
+                
+                // 创建高德导航视图
+                let walkView = AMapNaviWalkView()
+                walkView.delegate = self
+                walkView.showUIElements = true
+                walkView.showBrowseRouteButton = true
+                walkView.showMoreButton = true
+                walkView.showMode = .carPositionLocked
+                walkView.trackingMode = .mapNorth
+                
+                // 安全检查：确保容器视图存在
+                guard let container = self.mapView?.superview else {
+                    print("❌ [高德导航] 容器视图不存在")
+                    return
+                }
+                
+                // 将导航视图添加到父容器，全屏显示
+                container.addSubview(walkView)
+                walkView.translatesAutoresizingMaskIntoConstraints = false
+                NSLayoutConstraint.activate([
+                    walkView.topAnchor.constraint(equalTo: container.topAnchor),
+                    walkView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                    walkView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                    walkView.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+                ])
+                
+                // 设置起点和终点坐标
+                if let currentLocation = self.mapView?.userLocation?.coordinate,
+                   let startPoint = AMapNaviPoint.location(withLatitude: CGFloat(currentLocation.latitude), 
+                                                          longitude: CGFloat(currentLocation.longitude)),
+                   let endPoint = AMapNaviPoint.location(withLatitude: CGFloat(destination.latitude), 
+                                                        longitude: CGFloat(destination.longitude)) {
+                    
+                    print("🗺️ [高德导航] 设置起点: \(currentLocation)")
+                    print("🗺️ [高德导航] 设置终点: \(destination)")
+                    
+                    // 延迟添加导航视图到管理器，避免初始化冲突
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        if let walkManager = self.parent.walkNavManager.getWalkManager() {
+                            walkManager.addDataRepresentative(walkView)
+                            print("✅ [高德导航] 导航视图已添加到管理器")
+                            
+                            // 使用高德导航SDK进行路线规划
+                            walkManager.calculateWalkRoute(withStart: [startPoint], end: [endPoint])
+                            print("🗺️ [高德导航] 开始使用高德导航SDK进行路线规划")
+                            
+                            // 启动GPS导航
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                                walkManager.startGPSNavi()
+                                print("🚀 [高德导航] 已启动GPS导航")
+                            }
+                        }
+                    }
+                } else {
+                    print("⚠️ [高德导航] 无法获取当前位置或创建起终点坐标")
+                }
+                
+                // 设置地图中心位置，确保显示正确位置而不是北京
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    if let currentLocation = self.mapView?.userLocation?.coordinate {
+                        let centerCoordinate = CLLocationCoordinate2D(
+                            latitude: (currentLocation.latitude + destination.latitude) / 2,
+                            longitude: (currentLocation.longitude + destination.longitude) / 2
+                        )
+                        
+                        let distance = CLLocation(latitude: currentLocation.latitude, longitude: currentLocation.longitude)
+                            .distance(from: CLLocation(latitude: destination.latitude, longitude: destination.longitude))
+                        
+                        let latitudinalMeters = max(distance * 1.5, 10000)
+                        let longitudinalMeters = max(distance * 1.5, 10000)
+                        
+                        let region = MACoordinateRegion(
+                            center: centerCoordinate,
+                            span: MACoordinateSpan(
+                                latitudeDelta: latitudinalMeters / 111000, // 转换为度数
+                                longitudeDelta: longitudinalMeters / 111000
+                            )
+                        )
+                        
+                        // 使用深度搜索方法查找地图视图
+                        if let mapView = self.findMapView(in: walkView) {
+                            mapView.setRegion(region, animated: true)
+                            print("✅ [高德导航] 地图已跳转到正确位置: \(centerCoordinate)")
+                            print("🗺️ [高德导航] 显示范围: \(Int(region.span.latitudeDelta * 111000))米 x \(Int(region.span.longitudeDelta * 111000))米")
+                        } else {
+                            print("⚠️ [高德导航] 未找到地图视图，开始深度搜索...")
+                            
+                            // 增加延迟时间并添加更多调试信息
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                                print("🔍 [调试] 开始深度搜索地图视图...")
+                                self.debugViewHierarchy(walkView, level: 0)
+                                
+                                if let mapView = self.findMapView(in: walkView) {
+                                    mapView.setRegion(region, animated: true)
+                                    print("✅ [高德导航] 延迟设置地图区域成功")
+                                } else {
+                                    print("❌ [高德导航] 仍然无法找到地图视图，尝试直接设置AMapNaviWalkView")
+                                    // 尝试使用 AMapNaviWalkView 的公共方法
+                                    self.tryDirectSetMapCenter(walkView, centerCoordinate: centerCoordinate)
+                                }
+                            }
+                        }
+                    } else {
+                        print("⚠️ [高德导航] 无法获取当前位置，使用目标位置作为中心")
+                        let region = MACoordinateRegion(
+                            center: destination,
+                            span: MACoordinateSpan(
+                                latitudeDelta: 20000 / 111000, // 转换为度数
+                                longitudeDelta: 20000 / 111000
+                            )
+                        )
+                        
+                        if let mapView = self.findMapView(in: walkView) {
+                            mapView.setRegion(region, animated: true)
+                            print("✅ [高德导航] 地图已跳转到目标位置: \(destination)")
+                        } else {
+                            print("⚠️ [高德导航] 无法找到地图视图，使用目标位置作为中心")
+                            self.tryDirectSetMapCenter(walkView, centerCoordinate: destination)
+                        }
+                    }
+                }
+                
+                // 保存导航视图引用，用于后续移除
+                self.navigationView = walkView
+            }
+        }
+        
+        // 退出导航 - 在原地图界面退出导航
         @objc func exitNavigation() {
             guard isNavigating else { return }
             
             print("🛑 [步行导航] 退出导航")
             
-            isNavigating = false
+            // 确保在主线程执行
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                
+                self.isNavigating = false
             
             // 停止导航
-            parent.walkNavManager.stopNavigation()
+                self.parent.walkNavManager.stopNavigation()
+                
+                // 清除路线数据
+                self.currentRouteDistance = nil
+                self.currentRouteDuration = nil
+                print("🗑️ [导航] 路线数据已清除")
+                
+                // 隐藏导航视图（不移除，保持在地图容器中）
+                self.navigationView?.isHidden = true
+                
+                // 从管理器中移除导航视图
+                if let walkManager = self.parent.walkNavManager.getWalkManager(),
+                   let navigationView = self.navigationView {
+                    walkManager.removeDataRepresentative(navigationView)
+                    print("✅ [导航] 导航视图已从管理器移除")
+                }
             
             // 隐藏导航UI
-            hideNavigationUI()
+                self.hideNavigationUI()
             
             // 显示搜索框
-            showNonNavigationUI()
+                self.showNonNavigationUI()
             
-            parent.onNavigationStop?()
+                print("✅ [导航] 已退出导航，恢复地图界面")
+                
+                self.parent.onNavigationStop?()
+            }
         }
         
-        // 显示导航UI
+        // 显示导航UI - 暂时禁用高德导航相关功能
         private func showNavigationUI() {
+            // 显示基本导航UI
             topInfoView?.isHidden = false
             bottomNavView?.isHidden = false
             
-            // 更新导航信息
+            // 第二步：恢复导航信息更新功能
+            print("🔍 [调试] 开始恢复导航信息更新（第二步）")
             updateNavigationInfo()
+            print("🔍 [调试] 导航信息更新完成（第二步）")
+            
+            print("📍 [基本导航] 导航UI已显示（已禁用高德导航信息更新）")
         }
         
         // 隐藏导航UI
@@ -547,13 +1014,15 @@ struct AMapViewRepresentable: UIViewRepresentable {
             }
         }
         
-        // 更新导航信息
+        // 更新导航信息 - 优先使用WalkingNavigationManager的数据
         private func updateNavigationInfo() {
                 DispatchQueue.main.async {
-                    // 更新导航指令
-                    self.instructionLabel?.text = self.parent.walkNavManager.currentInstruction
-                    
-                    // 更新剩余距离和时间
+                // 更新导航指令 - 使用WalkingNavigationManager的实时指令
+                let instruction = self.parent.walkNavManager.currentInstruction
+                self.instructionLabel?.text = instruction
+                print("📢 [UI更新] 导航指令: \(instruction)")
+                
+                // 优先使用WalkingNavigationManager的实时数据
                     let distance = self.parent.walkNavManager.distanceToDestination
                     let time = self.parent.walkNavManager.estimatedArrivalTime
                     
@@ -573,8 +1042,9 @@ struct AMapViewRepresentable: UIViewRepresentable {
                 }
         }
         
-        // 启动定时器更新导航信息
+        // 启动定时器更新导航信息 - 显示WalkingNavigationManager的实时数据
         private func startNavigationTimer() {
+            print("🔍 [调试] 启动UI更新定时器，显示WalkingNavigationManager数据")
             Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
                 guard let self = self, self.isNavigating else { return }
                 
@@ -810,5 +1280,239 @@ class InfoCardView: UIView {
     
     @objc private func routeTapped() {
         onRoute?()
+    }
+}
+
+// MARK: - AMapNaviWalkViewDelegate 实现
+extension AMapViewRepresentable.Coordinator {
+    
+    func walkView(_ walkView: AMapNaviWalkView, didChange showMode: AMapNaviWalkViewShowMode) {
+        print("🔄 [高德导航] 显示模式变化: \(showMode.rawValue)")
+    }
+    
+    func walkView(_ walkView: AMapNaviWalkView, didChangeOrientation isLandscape: Bool) {
+        print("📱 [高德导航] 屏幕方向变化: \(isLandscape ? "横屏" : "竖屏")")
+    }
+    
+    func walkViewCloseButtonClicked(_ walkView: AMapNaviWalkView) {
+        print("❌ [高德导航] 用户点击关闭按钮")
+        exitNavigation()
+    }
+    
+    func walkViewMoreButtonClicked(_ walkView: AMapNaviWalkView) {
+        print("⚙️ [高德导航] 用户点击更多按钮")
+    }
+    
+    func walkViewBrowseRouteButtonClicked(_ walkView: AMapNaviWalkView) {
+        print("🗺️ [高德导航] 用户点击全览按钮")
+    }
+    
+    func walkViewTrafficButtonClicked(_ walkView: AMapNaviWalkView) {
+        print("🚦 [高德导航] 用户点击交通按钮")
+    }
+    
+    func walkViewZoomInOutButtonClicked(_ walkView: AMapNaviWalkView) {
+        print("🔍 [高德导航] 用户点击缩放按钮")
+    }
+}
+
+// MARK: - AMapSearchDelegate 路线搜索回调
+extension AMapViewRepresentable.Coordinator {
+    
+    // 步行路线搜索回调 - 添加错误处理和调试信息
+    func onRouteSearchDone(_ request: AMapRouteSearchBaseRequest, response: AMapRouteSearchResponse) {
+        print("🗺️ [地图API] 路线搜索完成")
+        print("🔍 [地图API] 请求类型: \(type(of: request))")
+        print("🔍 [地图API] 响应状态: \(response.count)")
+        
+        if response.count > 0 {
+            print("✅ [地图API] 找到 \(response.count) 条路线")
+            
+            if let route = response.route, let paths = route.paths, paths.count > 0 {
+                guard let path = paths.first else { 
+                    print("❌ [地图API] 无法获取第一条路线")
+                    return 
+                }
+                
+                // 计算总距离
+                let totalDistance = path.distance
+                let totalDuration = path.duration
+                
+                print("📏 [地图API] 路线距离: \(totalDistance)米, 预计时间: \(totalDuration)秒")
+                
+                // 更新导航信息
+                DispatchQueue.main.async {
+                    self.updateNavigationInfoWithRouteData(distance: Double(totalDistance), duration: Double(totalDuration))
+                }
+                
+                // 在地图上显示详细路线
+                self.displayRouteOnMap(path: path)
+                
+                // 解析路线步骤，生成真实导航指令
+                print("🔍 [地图API] 开始调用路线步骤解析")
+                self.parent.walkNavManager.parseRouteSteps(from: path)
+                print("✅ [地图API] 路线步骤解析调用完成")
+                
+                // 更新WalkingNavigationManager的导航状态
+                DispatchQueue.main.async {
+                    self.parent.walkNavManager.distanceToDestination = Double(totalDistance)
+                    print("✅ [地图API] WalkingNavigationManager状态已更新")
+                }
+                
+                // 确保导航视图显示路线
+                self.ensureNavigationViewShowsRoute()
+            } else {
+                print("❌ [地图API] 路线数据为空")
+            }
+        } else {
+            print("❌ [地图API] 未找到路线，响应数量: \(response.count)")
+        }
+    }
+    
+    // 路线搜索失败回调
+    func aMapSearchRequest(_ request: Any, didFailWithError error: Error) {
+        print("❌ [地图API] 路线搜索失败: \(error.localizedDescription)")
+        print("🔍 [地图API] 错误详情: \(error)")
+    }
+    
+    // 通用搜索回调 - 捕获所有搜索响应
+    func aMapSearchRequest(_ request: Any, didFailWithError error: Error?) {
+        if let error = error {
+            print("❌ [地图API] 通用搜索失败: \(error.localizedDescription)")
+        } else {
+            print("🔍 [地图API] 通用搜索回调被调用，但无错误信息")
+        }
+    }
+    
+    // 尝试其他可能的回调方法名 - 步行路线搜索
+    func onWalkingRouteSearchDone(_ request: AMapWalkingRouteSearchRequest, response: AMapRouteSearchResponse) {
+        print("🗺️ [地图API] 步行路线搜索完成")
+        // 调用主方法
+        self.onRouteSearchDone(request, response: response)
+    }
+    
+    // 更新导航信息
+    private func updateNavigationInfoWithRouteData(distance: Double, duration: Double) {
+        print("🔍 [UI更新] 开始更新导航信息 - 距离: \(distance), 时间: \(duration)")
+        
+        // 保存路线数据，供定时器使用
+        self.currentRouteDistance = distance
+        self.currentRouteDuration = duration
+        print("💾 [UI更新] 路线数据已保存 - 距离: \(distance), 时间: \(duration)")
+        
+        // 格式化距离显示
+        let distanceText: String
+        if distance >= 1000 {
+            distanceText = String(format: "%.1f公里", distance / 1000.0)
+        } else {
+            distanceText = "\(Int(distance))米"
+        }
+        
+        // 格式化时间显示
+        let timeText: String
+        if duration >= 3600 {
+            let hours = Int(duration) / 3600
+            let minutes = (Int(duration) % 3600) / 60
+            timeText = "\(hours)小时\(minutes)分钟"
+        } else if duration >= 60 {
+            let minutes = Int(duration) / 60
+            timeText = "\(minutes)分钟"
+        } else {
+            timeText = "\(Int(duration))秒"
+        }
+        
+        print("🔍 [UI更新] 格式化后 - 距离: \(distanceText), 时间: \(timeText)")
+        
+        // 更新底部导航栏
+        if let remainLabel = self.remainLabel {
+            remainLabel.text = "剩余 \(distanceText) \(timeText)"
+            print("✅ [UI更新] remainLabel已更新: \(remainLabel.text ?? "nil")")
+        } else {
+            print("❌ [UI更新] remainLabel为nil，无法更新UI")
+            print("🔍 [UI更新] 尝试强制更新UI状态")
+            
+            // 尝试强制更新UI - 直接设置到父视图
+            if let bottomNavView = self.bottomNavView {
+                for subview in bottomNavView.subviews {
+                    if let label = subview as? UILabel {
+                        label.text = "剩余 \(distanceText) \(timeText)"
+                        print("✅ [UI更新] 通过子视图更新成功: \(label.text ?? "nil")")
+                        break
+                    }
+                }
+            }
+        }
+        
+        // 更新导航指令
+        if let instructionLabel = self.instructionLabel {
+            instructionLabel.text = "开始导航，总距离 \(distanceText)"
+        }
+    }
+    
+        // 在地图上显示详细路线
+        private func displayRouteOnMap(path: AMapPath) {
+            guard let mapView = mapView else { 
+                print("❌ [路线显示] 地图视图未初始化")
+                return 
+            }
+            
+            print("🗺️ [路线显示] 开始在地图上显示路线")
+            
+            // 移除之前的路线
+            mapView.removeOverlays(mapView.overlays)
+            
+            // 创建路线坐标数组
+            var coordinates: [CLLocationCoordinate2D] = []
+            if let steps = path.steps {
+                for step in steps {
+                    if let polyline = step.polyline {
+                        let coords = polyline.components(separatedBy: ";")
+                        for coordString in coords {
+                            let parts = coordString.components(separatedBy: ",")
+                            if parts.count >= 2,
+                               let lng = Double(parts[0]),
+                               let lat = Double(parts[1]) {
+                                coordinates.append(CLLocationCoordinate2D(latitude: lat, longitude: lng))
+                            }
+                        }
+                    }
+                }
+            }
+            
+            print("📍 [路线显示] 解析到 \(coordinates.count) 个路线坐标")
+            
+            if coordinates.count > 0 {
+                // 创建路线
+                let polyline = MAPolyline(coordinates: &coordinates, count: UInt(coordinates.count))
+                
+                // 添加路线到地图
+                mapView.add(polyline)
+                
+                // 设置地图区域以显示完整路线
+                let region = MACoordinateRegion(center: coordinates[coordinates.count/2], 
+                                              span: MACoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01))
+                mapView.setRegion(region, animated: true)
+                
+                print("✅ [路线显示] 路线已添加到地图，坐标数量: \(coordinates.count)")
+            } else {
+                print("❌ [路线显示] 没有找到路线坐标")
+            }
+        }
+        
+        // 确保导航视图显示路线
+        private func ensureNavigationViewShowsRoute() {
+            print("🗺️ [导航] 确保导航视图显示路线")
+            
+            // 确保导航视图可见
+            navigationView?.isHidden = false
+            
+            // 确保导航视图在最上层
+            navigationView?.superview?.bringSubviewToFront(navigationView!)
+            
+            // 强制刷新导航视图
+            navigationView?.setNeedsDisplay()
+            navigationView?.setNeedsLayout()
+            
+            print("✅ [导航] 导航视图已刷新并确保显示路线")
     }
 }

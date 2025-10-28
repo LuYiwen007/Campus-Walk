@@ -7,7 +7,6 @@ struct NavigationModeSelector: View {
     @State private var destinationLongitude: String = "113.267"
     @State private var showMapNavigation = false
     @State private var showARNavigation = false
-    @State private var showNavigationTest = false
     
     var body: some View {
         NavigationView {
@@ -103,31 +102,6 @@ struct NavigationModeSelector: View {
                     }
                     .foregroundColor(.primary)
                     
-                    // 导航测试按钮
-                    Button(action: {
-                        showNavigationTest = true
-                    }) {
-                        HStack {
-                            Image(systemName: "testtube.2")
-                                .font(.title2)
-                            VStack(alignment: .leading) {
-                                Text("导航测试")
-                                    .font(.headline)
-                                    .fontWeight(.bold)
-                                Text("测试导航功能，包含所有控制")
-                                    .font(.caption)
-                                    .foregroundColor(.gray)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .foregroundColor(.gray)
-                        }
-                        .padding()
-                        .background(Color.white)
-                        .cornerRadius(10)
-                        .shadow(radius: 2)
-                    }
-                    .foregroundColor(.primary)
                 }
                 
                 Spacer()
@@ -146,9 +120,6 @@ struct NavigationModeSelector: View {
                let lon = Double(destinationLongitude) {
                 ARNavigationView(destination: CLLocationCoordinate2D(latitude: lat, longitude: lon))
             }
-        }
-        .sheet(isPresented: $showNavigationTest) {
-            NavigationTestView()
         }
     }
 }

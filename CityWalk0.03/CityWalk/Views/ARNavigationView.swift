@@ -50,7 +50,7 @@ struct ARNavigationView: View {
         )
         .ignoresSafeArea(.all)
         .onAppear {
-            // 开始导航
+            // 开始AR导航
             navManager.startNavigation(to: destination)
         }
         .onReceive(navManager.$currentInstruction) { instruction in
