@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>AMapAPIKey</key>
-	<string>ea6ffe534577fb90a8ce52a72c0aa121</string>
+	<string>4c6e7aa728f408e1fc754200f5bed2e4</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleExecutable</key>
@@ -84,7 +84,7 @@
 	<key>io.amap.api.key</key>
 	<dict>
 		<key>ios</key>
-		<string>ea6ffe534577fb90a8ce52a72c0aa121</string>
+		<string>4c6e7aa728f408e1fc754200f5bed2e4</string>
 	</dict>
 </dict>
 </plist>
