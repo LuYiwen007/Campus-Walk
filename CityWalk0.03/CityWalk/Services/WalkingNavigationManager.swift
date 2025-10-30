@@ -599,6 +599,7 @@ extension WalkingNavigationManager {
               let currentLocation = locationManager.location?.coordinate,
               let destination = destination else {
             print("⚠️ [实时导航] 导航状态更新条件不满足 - isNavigating: \(isNavigating), currentLocation: \(locationManager.location?.coordinate != nil), destination: \(destination != nil)")
+            print("🔍 [实时导航] 详细状态 - isNavigating: \(isNavigating), 定位坐标: \(locationManager.location?.coordinate ?? CLLocationCoordinate2D(latitude: 0, longitude: 0)), 目的地: \(destination ?? CLLocationCoordinate2D(latitude: 0, longitude: 0))")
             return
         }
         

@@ -215,6 +215,9 @@ struct AMapViewRepresentable: UIViewRepresentable {
         
         container.addSubview(topInfoView)
         
+        // 确保UI面板在最上层
+        container.bringSubviewToFront(topInfoView)
+        
         NSLayoutConstraint.activate([
             // 顶部信息栏 - 紧贴顶部
             topInfoView.topAnchor.constraint(equalTo: container.topAnchor, constant: 0),
@@ -233,6 +236,8 @@ struct AMapViewRepresentable: UIViewRepresentable {
             instructionLabel.centerYAnchor.constraint(equalTo: topInfoView.centerYAnchor),
             instructionLabel.trailingAnchor.constraint(equalTo: topInfoView.trailingAnchor, constant: -16)
         ])
+        
+        print("✅ [UI调试] 顶部导航面板已添加到容器")
         
         // 底部导航控制栏 - 深色背景，按照高德官方样式
         let bottomNavView = UIView()
@@ -272,6 +277,9 @@ struct AMapViewRepresentable: UIViewRepresentable {
         bottomNavView.addSubview(settingsButton)
         container.addSubview(bottomNavView)
         
+        // 确保UI面板在最上层
+        container.bringSubviewToFront(bottomNavView)
+        
         NSLayoutConstraint.activate([
             // 底部信息栏 - 紧贴底部
             bottomNavView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 0),
@@ -295,6 +303,8 @@ struct AMapViewRepresentable: UIViewRepresentable {
             settingsButton.widthAnchor.constraint(equalToConstant: 60),
             settingsButton.heightAnchor.constraint(equalToConstant: 36)
         ])
+        
+        print("✅ [UI调试] 底部导航面板已添加到容器")
         
         coordinator.topInfoView = topInfoView
         coordinator.instructionLabel = instructionLabel
@@ -401,6 +411,8 @@ struct AMapViewRepresentable: UIViewRepresentable {
             locationManager.requestLocation(withReGeocode: false) { location, _, error in
                 if let error = error {
                     print("❌ [定位] 定位失败: \(error.localizedDescription)")
+                    print("🔍 [定位] 错误详情: \(error)")
+                    print("🔍 [定位] 错误代码: \(error._code)")
                     return
                 }
                 
@@ -469,36 +481,6 @@ struct AMapViewRepresentable: UIViewRepresentable {
             search?.aMapWalkingRouteSearch(request)
         }
         
-        // 路线规划回调
-        func onRouteSearchDone(_ request: AMapRouteSearchBaseRequest!, response: AMapRouteSearchResponse!) {
-            guard let path = response.route.paths.first, let mapView = mapView else { return }
-            
-            if let steps = path.steps {
-                var coordinates: [CLLocationCoordinate2D] = []
-                for step in steps {
-                    let polylineStr = step.polyline
-                    let points = polylineStr?.split(separator: ";").compactMap { pair -> CLLocationCoordinate2D? in
-                        let comps = pair.split(separator: ",")
-                        if comps.count == 2, let lon = Double(comps[0]), let lat = Double(comps[1]) {
-                            return CLLocationCoordinate2D(latitude: lat, longitude: lon)
-                        }
-                        return nil
-                    } ?? []
-                    coordinates.append(contentsOf: points)
-                }
-                
-                let polyline = MAPolyline(coordinates: &coordinates, count: UInt(coordinates.count))
-                mapView.removeOverlays(mapView.overlays)
-                mapView.add(polyline)
-                
-                // 设置地图中心
-                if coordinates.count > 0 {
-                    let centerCoordinate = coordinates[coordinates.count / 2]
-                    mapView.setCenter(centerCoordinate, animated: true)
-                }
-            }
-        }
-        
         // MARK: - 地图视图查找辅助方法
         
         /// 深度搜索地图视图
@@ -515,7 +497,7 @@ struct AMapViewRepresentable: UIViewRepresentable {
                 }
             }
             
-            return nil
+                        return nil
         }
         
         /// 调试视图层次结构
@@ -594,6 +576,11 @@ struct AMapViewRepresentable: UIViewRepresentable {
                 
                 // 使用地图API进行路线规划
                 self.calculateRouteUsingAMapAPI(to: destination)
+                
+                // 延迟确保UI在最顶层（给高德导航视图时间初始化）
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    self.ensureNavigationUIOnTop()
+                }
                     
                 print("✅ [导航] 导航已在地图界面启动")
                 print("🔍 [调试] 导航视图可见性: \(self.navigationView?.isHidden == false ? "可见" : "隐藏")")
@@ -628,6 +615,8 @@ struct AMapViewRepresentable: UIViewRepresentable {
                                                  longitude: CGFloat(currentLocation.longitude))
             request.destination = AMapGeoPoint.location(withLatitude: CGFloat(destination.latitude), 
                                                         longitude: CGFloat(destination.longitude))
+            // 设置返回字段类型，确保返回polyline数据
+            request.showFieldsType = AMapWalkingRouteShowFieldType.all
             
             print("🔍 [地图API] 请求起点: \(request.origin?.description ?? "nil")")
             print("🔍 [地图API] 请求终点: \(request.destination?.description ?? "nil")")
@@ -642,6 +631,10 @@ struct AMapViewRepresentable: UIViewRepresentable {
             self.fallbackDistanceCalculation(from: currentLocation, to: destination)
             
             // 同时尝试API调用
+            print("🔍 [地图API] 准备发送路线规划请求")
+            print("🔍 [地图API] 搜索API状态: \(searchAPI != nil ? "已初始化" : "未初始化")")
+            print("🔍 [地图API] 请求对象: \(request)")
+            
             searchAPI.aMapWalkingRouteSearch(request)
             print("✅ [地图API] 路线规划请求已发送")
             
@@ -765,6 +758,25 @@ struct AMapViewRepresentable: UIViewRepresentable {
             }
         }
         
+        // 确保导航UI在最顶层
+        private func ensureNavigationUIOnTop() {
+            print("🔍 [UI调试] 确保导航UI在最顶层")
+            
+            // 确保顶部和底部面板都在最顶层
+            if let topView = topInfoView, let bottomView = bottomNavView {
+                // 获取共同的父容器
+                if let container = topView.superview {
+                    container.bringSubviewToFront(topView)
+                    container.bringSubviewToFront(bottomView)
+                    print("✅ [UI调试] 导航UI已置于最顶层")
+                } else {
+                    print("❌ [UI调试] 无法找到容器视图")
+                }
+            } else {
+                print("❌ [UI调试] 导航UI视图未初始化")
+            }
+        }
+        
         // 显示导航信息面板
         private func showNavigationInfoPanel() {
             print("📱 [导航] 显示导航信息面板")
@@ -773,9 +785,31 @@ struct AMapViewRepresentable: UIViewRepresentable {
             topInfoView?.isHidden = false
             bottomNavView?.isHidden = false
             
+            // 添加调试信息
+            print("🔍 [UI调试] topInfoView状态: \(topInfoView?.isHidden == false ? "显示" : "隐藏")")
+            print("🔍 [UI调试] bottomNavView状态: \(bottomNavView?.isHidden == false ? "显示" : "隐藏")")
+            print("🔍 [UI调试] topInfoView父视图: \(topInfoView?.superview != nil ? "存在" : "nil")")
+            print("🔍 [UI调试] bottomNavView父视图: \(bottomNavView?.superview != nil ? "存在" : "nil")")
+            
             // 确保导航面板在最上层
             topInfoView?.superview?.bringSubviewToFront(topInfoView!)
             bottomNavView?.superview?.bringSubviewToFront(bottomNavView!)
+            
+            // 强制刷新UI
+            topInfoView?.setNeedsLayout()
+            bottomNavView?.setNeedsLayout()
+            topInfoView?.layoutIfNeeded()
+            bottomNavView?.layoutIfNeeded()
+            
+            // 确保UI面板在最顶层
+            if let container = topInfoView?.superview {
+                container.bringSubviewToFront(topInfoView!)
+                container.bringSubviewToFront(bottomNavView!)
+                print("✅ [UI调试] 已将导航面板置于最顶层")
+            }
+            
+            // 额外确保导航UI在最顶层
+            ensureNavigationUIOnTop()
             
             // 初始化导航信息显示
             updateNavigationInfo()
@@ -1022,9 +1056,35 @@ struct AMapViewRepresentable: UIViewRepresentable {
                 self.instructionLabel?.text = instruction
                 print("📢 [UI更新] 导航指令: \(instruction)")
                 
-                // 优先使用WalkingNavigationManager的实时数据
-                    let distance = self.parent.walkNavManager.distanceToDestination
-                    let time = self.parent.walkNavManager.estimatedArrivalTime
+                // 优先使用保存的总路线距离，如果没有则使用实时距离
+                let distance: Double
+                let time: String
+                
+                if let routeDistance = self.currentRouteDistance, routeDistance > 0 {
+                    // 使用总路线距离
+                    distance = routeDistance
+                    if let routeDuration = self.currentRouteDuration, routeDuration > 0 {
+                        // 格式化时间显示
+                        if routeDuration >= 3600 {
+                            let hours = Int(routeDuration) / 3600
+                            let minutes = (Int(routeDuration) % 3600) / 60
+                            time = "\(hours)小时\(minutes)分钟"
+                        } else if routeDuration >= 60 {
+                            let minutes = Int(routeDuration) / 60
+                            time = "\(minutes)分钟"
+                        } else {
+                            time = "\(Int(routeDuration))秒"
+                        }
+                    } else {
+                        time = self.parent.walkNavManager.estimatedArrivalTime
+                    }
+                    print("🔍 [UI更新] 使用总路线距离: \(distance)米")
+                } else {
+                    // 回退到实时距离
+                    distance = self.parent.walkNavManager.distanceToDestination
+                    time = self.parent.walkNavManager.estimatedArrivalTime
+                    print("🔍 [UI更新] 使用实时距离: \(distance)米")
+                }
                     
                     // 格式化距离显示
                     let distanceText: String
@@ -1050,6 +1110,8 @@ struct AMapViewRepresentable: UIViewRepresentable {
                 
                 DispatchQueue.main.async {
                     self.updateNavigationInfo()
+                    // 定期确保UI在最顶层
+                    self.ensureNavigationUIOnTop()
                 }
             }
         }
@@ -1324,45 +1386,56 @@ extension AMapViewRepresentable.Coordinator {
         print("🗺️ [地图API] 路线搜索完成")
         print("🔍 [地图API] 请求类型: \(type(of: request))")
         print("🔍 [地图API] 响应状态: \(response.count)")
+        print("🔍 [地图API] 响应对象: \(response)")
         
         if response.count > 0 {
             print("✅ [地图API] 找到 \(response.count) 条路线")
             
-            if let route = response.route, let paths = route.paths, paths.count > 0 {
-                guard let path = paths.first else { 
-                    print("❌ [地图API] 无法获取第一条路线")
-                    return 
+            if let route = response.route {
+                print("🔍 [地图API] 路线对象: \(route)")
+                print("🔍 [地图API] 路线路径数量: \(route.paths?.count ?? 0)")
+                
+                if let paths = route.paths, paths.count > 0 {
+                    guard let path = paths.first else { 
+                        print("❌ [地图API] 无法获取第一条路线")
+                        return 
+                    }
+                    
+                    print("🔍 [地图API] 路径对象: \(path)")
+                    print("🔍 [地图API] 路径步骤数量: \(path.steps?.count ?? 0)")
+                    
+                    // 计算总距离
+                    let totalDistance = path.distance
+                    let totalDuration = path.duration
+                    
+                    print("📏 [地图API] 路线距离: \(totalDistance)米, 预计时间: \(totalDuration)秒")
+                    
+                    // 更新导航信息
+                    DispatchQueue.main.async {
+                        self.updateNavigationInfoWithRouteData(distance: Double(totalDistance), duration: Double(totalDuration))
+                    }
+                    
+                    // 在地图上显示详细路线
+                    self.displayRouteOnMap(path: path)
+                    
+                    // 解析路线步骤，生成真实导航指令
+                    print("🔍 [地图API] 开始调用路线步骤解析")
+                    self.parent.walkNavManager.parseRouteSteps(from: path)
+                    print("✅ [地图API] 路线步骤解析调用完成")
+                    
+                    // 更新WalkingNavigationManager的导航状态
+                    DispatchQueue.main.async {
+                        self.parent.walkNavManager.distanceToDestination = Double(totalDistance)
+                        print("✅ [地图API] WalkingNavigationManager状态已更新")
+                    }
+                    
+                    // 确保导航视图显示路线
+                    self.ensureNavigationViewShowsRoute()
+                } else {
+                    print("❌ [地图API] 路线路径为空")
                 }
-                
-                // 计算总距离
-                let totalDistance = path.distance
-                let totalDuration = path.duration
-                
-                print("📏 [地图API] 路线距离: \(totalDistance)米, 预计时间: \(totalDuration)秒")
-                
-                // 更新导航信息
-                DispatchQueue.main.async {
-                    self.updateNavigationInfoWithRouteData(distance: Double(totalDistance), duration: Double(totalDuration))
-                }
-                
-                // 在地图上显示详细路线
-                self.displayRouteOnMap(path: path)
-                
-                // 解析路线步骤，生成真实导航指令
-                print("🔍 [地图API] 开始调用路线步骤解析")
-                self.parent.walkNavManager.parseRouteSteps(from: path)
-                print("✅ [地图API] 路线步骤解析调用完成")
-                
-                // 更新WalkingNavigationManager的导航状态
-                DispatchQueue.main.async {
-                    self.parent.walkNavManager.distanceToDestination = Double(totalDistance)
-                    print("✅ [地图API] WalkingNavigationManager状态已更新")
-                }
-                
-                // 确保导航视图显示路线
-                self.ensureNavigationViewShowsRoute()
             } else {
-                print("❌ [地图API] 路线数据为空")
+                print("❌ [地图API] 路线对象为空")
             }
         } else {
             print("❌ [地图API] 未找到路线，响应数量: \(response.count)")
