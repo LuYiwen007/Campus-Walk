@@ -46,8 +46,8 @@ struct NavigationModeSelector: View {
                     
                     // 地图导航按钮
                     Button(action: {
-                        if let lat = Double(destinationLatitude),
-                           let lon = Double(destinationLongitude) {
+                        if Double(destinationLatitude) != nil,
+                           Double(destinationLongitude) != nil {
                             showMapNavigation = true
                         }
                     }) {
@@ -75,8 +75,8 @@ struct NavigationModeSelector: View {
                     
                     // AR导航按钮
                     Button(action: {
-                        if let lat = Double(destinationLatitude),
-                           let lon = Double(destinationLongitude) {
+                        if Double(destinationLatitude) != nil,
+                           Double(destinationLongitude) != nil {
                             showARNavigation = true
                         }
                     }) {
@@ -110,8 +110,8 @@ struct NavigationModeSelector: View {
             .navigationTitle("导航选择")
         }
         .sheet(isPresented: $showMapNavigation) {
-            if let lat = Double(destinationLatitude),
-               let lon = Double(destinationLongitude) {
+            if Double(destinationLatitude) != nil,
+               Double(destinationLongitude) != nil {
                 MapNavigationView()
             }
         }

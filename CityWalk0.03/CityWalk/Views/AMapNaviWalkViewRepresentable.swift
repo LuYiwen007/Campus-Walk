@@ -24,6 +24,9 @@ struct AMapNaviWalkViewRepresentable: UIViewRepresentable {
         let walkView = AMapNaviWalkView()
         walkView.delegate = context.coordinator
         
+        // 保存引用到 Coordinator
+        context.coordinator.walkViewRef = walkView
+        
         // 配置导航视图属性
         walkView.showUIElements = true
         walkView.showBrowseRouteButton = true
@@ -33,12 +36,16 @@ struct AMapNaviWalkViewRepresentable: UIViewRepresentable {
         walkView.showMode = .carPositionLocked
         walkView.trackingMode = .mapNorth
         
-        // 延迟添加导航视图到管理器，避免初始化冲突
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        // 立即尝试添加导航视图到管理器（如果管理器已初始化）
+        // 如果未初始化，会在 startNavigation 中再次尝试
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak walkView] in
+            guard let walkView = walkView else { return }
             let navigationManager = WalkingNavigationManager.shared
             if let amapWalkManager = navigationManager.getWalkManager() {
                 amapWalkManager.addDataRepresentative(walkView)
                 print("✅ [SwiftUI包装器] 导航视图已添加到管理器")
+            } else {
+                print("⚠️ [SwiftUI包装器] 导航管理器尚未初始化，将在启动导航时添加")
             }
         }
         
@@ -46,12 +53,16 @@ struct AMapNaviWalkViewRepresentable: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: AMapNaviWalkView, context: Context) {
-        // 根据导航状态更新视图
-        if isNavigating {
-            // 开始导航时的处理
-            context.coordinator.startNavigation(to: destination)
-        } else {
-            // 停止导航时的处理
+        // 防止重复调用 - 只在状态变化时执行
+        // SwiftUI 的 updateUIView 可能被多次调用，需要防抖处理
+        
+        if isNavigating && !context.coordinator.hasStartedNavigation {
+            // 延迟执行，避免在视图更新过程中触发
+            DispatchQueue.main.async {
+                context.coordinator.startNavigation(to: destination)
+            }
+        } else if !isNavigating && context.coordinator.hasStartedNavigation {
+            // 状态变为非导航时停止
             context.coordinator.stopNavigation()
         }
     }
@@ -64,11 +75,21 @@ struct AMapNaviWalkViewRepresentable: UIViewRepresentable {
         )
     }
     
+    // 视图销毁时的清理
+    static func dismantleUIView(_ uiView: AMapNaviWalkView, coordinator: Coordinator) {
+        print("🧹 [SwiftUI包装器] 清理导航视图")
+        coordinator.cleanup()
+    }
+    
     class Coordinator: NSObject, AMapNaviWalkViewDelegate {
         @Binding var isNavigating: Bool
         let onNavigationStart: (() -> Void)?
         let onNavigationStop: (() -> Void)?
         private let walkNavManager = WalkingNavigationManager.shared
+        
+        // 防止重复调用的标志（internal 访问级别，允许结构体访问）
+        var hasStartedNavigation = false
+        var walkViewRef: AMapNaviWalkView?
         
         init(
             isNavigating: Binding<Bool>,
@@ -81,15 +102,80 @@ struct AMapNaviWalkViewRepresentable: UIViewRepresentable {
         }
         
         func startNavigation(to destination: CLLocationCoordinate2D) {
+            // 防止重复调用
+            guard !hasStartedNavigation else {
+                print("⚠️ [SwiftUI包装器] 导航已启动，跳过重复调用")
+                return
+            }
+            
             print("🚀 [SwiftUI包装器] 开始导航到: \(destination)")
-            walkNavManager.startWalkingNavigation(to: destination)
-            onNavigationStart?()
+            hasStartedNavigation = true
+            
+            // 确保在主线程执行
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                
+                // 确保导航视图已添加到管理器
+                self.ensureWalkViewAddedToManager()
+                
+                // 启动导航
+                self.walkNavManager.startWalkingNavigation(to: destination)
+                self.onNavigationStart?()
+            }
         }
         
         func stopNavigation() {
             print("🛑 [SwiftUI包装器] 停止导航")
-            walkNavManager.stopNavigation()
-            onNavigationStop?()
+            
+            // 重置标志
+            hasStartedNavigation = false
+            
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.walkNavManager.stopNavigation()
+                self.onNavigationStop?()
+            }
+        }
+        
+        // 确保导航视图已添加到管理器
+        private func ensureWalkViewAddedToManager() {
+            guard let walkView = walkViewRef else {
+                print("⚠️ [SwiftUI包装器] walkViewRef 为 nil，无法添加到管理器")
+                return
+            }
+            
+            let navigationManager = WalkingNavigationManager.shared
+            if let amapWalkManager = navigationManager.getWalkManager() {
+                // 安全地添加导航视图（SDK 会处理重复添加的情况）
+                amapWalkManager.addDataRepresentative(walkView)
+                print("✅ [SwiftUI包装器] 确保导航视图已添加到管理器")
+                
+                // 确保 walkView 也被保存到 WalkingNavigationManager
+                // 这样在路线规划成功时可以确认视图已添加
+                navigationManager.setWalkView(walkView)
+            } else {
+                print("❌ [SwiftUI包装器] 导航管理器尚未初始化")
+            }
+        }
+        
+        // 清理资源
+        func cleanup() {
+            // 停止导航
+            if hasStartedNavigation {
+                stopNavigation()
+            }
+            
+            // 从管理器中移除视图
+            if let walkView = walkViewRef {
+                let navigationManager = WalkingNavigationManager.shared
+                if let amapWalkManager = navigationManager.getWalkManager() {
+                    amapWalkManager.removeDataRepresentative(walkView)
+                    print("🧹 [SwiftUI包装器] 已从管理器中移除导航视图")
+                }
+            }
+            
+            // 清空引用
+            walkViewRef = nil
         }
         
         // MARK: - AMapNaviWalkViewDelegate

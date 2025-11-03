@@ -382,7 +382,7 @@ fileprivate struct ARViewContainer: UIViewRepresentable {
         }
 
         func start() {
-            if CLLocationManager.authorizationStatus() == .notDetermined {
+            if locationManager.authorizationStatus == .notDetermined {
                 locationManager.requestWhenInUseAuthorization()
             }
             locationManager.startUpdatingLocation()

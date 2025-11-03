@@ -38,6 +38,9 @@ class WalkingNavigationManager: NSObject, ObservableObject {
     private var navigationTimer: Timer?
     private var lastUpdateTime: Date = Date()
     
+    // 路线规划状态标志（防止重复调用）
+    private var isCalculatingRoute = false
+    
     override init() {
         super.init()
         setupLocationManager()
@@ -58,16 +61,12 @@ class WalkingNavigationManager: NSObject, ObservableObject {
         
         // 初始化步行导航管理器 - 使用更安全的方式
         DispatchQueue.main.async {
-            do {
-                self.walkManager = AMapNaviWalkManager.sharedInstance()
-                self.walkManager?.delegate = self
-                print("✅ [步行导航] 导航管理器初始化成功")
-                
-                // 初始化导航视图 - 关键功能！
-                self.setupWalkView()
-            } catch {
-                print("❌ [步行导航] 导航管理器初始化失败: \(error)")
-            }
+            self.walkManager = AMapNaviWalkManager.sharedInstance()
+            self.walkManager?.delegate = self
+            print("✅ [步行导航] 导航管理器初始化成功")
+            
+            // 初始化导航视图 - 关键功能！
+            self.setupWalkView()
         }
     }
     
@@ -75,31 +74,27 @@ class WalkingNavigationManager: NSObject, ObservableObject {
     private func setupWalkView() {
         print("🔧 [步行导航] 开始初始化导航视图")
         
-        do {
-            // 创建高德导航视图
-            walkView = AMapNaviWalkView()
-            walkView?.delegate = self
-            
-            // 配置导航视图属性
-            walkView?.showUIElements = true
-            walkView?.showBrowseRouteButton = true
-            walkView?.showMoreButton = true
-            
-            // 设置显示模式
-            walkView?.showMode = .carPositionLocked
-            walkView?.trackingMode = .mapNorth
-            
-            // 延迟添加导航视图到管理器，避免初始化冲突
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                if let walkView = self.walkView, let walkManager = self.walkManager {
-                    walkManager.addDataRepresentative(walkView)
-                    print("✅ [步行导航] 导航视图初始化成功并已添加到管理器")
-                } else {
-                    print("❌ [步行导航] 导航视图初始化失败")
-                }
+        // 创建高德导航视图
+        walkView = AMapNaviWalkView()
+        walkView?.delegate = self
+        
+        // 配置导航视图属性
+        walkView?.showUIElements = true
+        walkView?.showBrowseRouteButton = true
+        walkView?.showMoreButton = true
+        
+        // 设置显示模式
+        walkView?.showMode = .carPositionLocked
+        walkView?.trackingMode = .mapNorth
+        
+        // 延迟添加导航视图到管理器，避免初始化冲突
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            if let walkView = self.walkView, let walkManager = self.walkManager {
+                walkManager.addDataRepresentative(walkView)
+                print("✅ [步行导航] 导航视图初始化成功并已添加到管理器")
+            } else {
+                print("❌ [步行导航] 导航视图初始化失败")
             }
-        } catch {
-            print("❌ [步行导航] 导航视图创建失败: \(error)")
         }
     }
     
@@ -201,7 +196,7 @@ class WalkingNavigationManager: NSObject, ObservableObject {
     /// 规划步行路线
     private func planWalkingRoute(to destination: CLLocationCoordinate2D) {
         // 确保导航管理器已初始化
-        guard let walkManager = walkManager else {
+        guard walkManager != nil else {
             print("❌ [步行导航] 导航管理器未初始化，重新初始化...")
             setupNavigationComponents()
             return
@@ -221,25 +216,67 @@ class WalkingNavigationManager: NSObject, ObservableObject {
         
         // 创建起终点 - 使用更安全的方式
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            do {
-                guard let startPoint = AMapNaviPoint.location(withLatitude: CGFloat(currentLocation.coordinate.latitude), 
-                                                             longitude: CGFloat(currentLocation.coordinate.longitude)),
-                      let endPoint = AMapNaviPoint.location(withLatitude: CGFloat(destination.latitude), 
-                                                         longitude: CGFloat(destination.longitude)) else {
-                    print("❌ [步行导航] 无法创建起终点")
+            guard let startPoint = AMapNaviPoint.location(withLatitude: CGFloat(currentLocation.coordinate.latitude), 
+                                                         longitude: CGFloat(currentLocation.coordinate.longitude)),
+                  let endPoint = AMapNaviPoint.location(withLatitude: CGFloat(destination.latitude), 
+                                                     longitude: CGFloat(destination.longitude)) else {
+                print("❌ [步行导航] 无法创建起终点")
+                return
+            }
+            
+            print("✅ [步行导航] 起终点创建成功，开始规划路线")
+            
+            // 防止重复调用路线规划
+            guard !self.isCalculatingRoute else {
+                print("⚠️ [步行导航] 路线规划已在进行中，跳过重复调用")
+                return
+            }
+            
+            // 确保 walkManager 存在
+            guard self.walkManager != nil else {
+                print("❌ [步行导航] walkManager 不存在，无法算路")
+                return
+            }
+            
+            self.isCalculatingRoute = true
+            print("🔄 [步行导航] 使用导航管理器进行路线规划...")
+            
+            // 在主线程上调用，确保安全
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else {
+                    print("❌ [步行导航] self已释放，无法算路")
                     return
                 }
                 
-                print("✅ [步行导航] 起终点创建成功，开始规划路线")
+                // 确保 walkManager 仍然存在
+                guard let wm = self.walkManager else {
+                    print("❌ [步行导航] walkManager 不存在，无法算路")
+                    self.isCalculatingRoute = false
+                    return
+                }
                 
-                // 使用安全的路线规划方式，避免崩溃
-                print("🔄 [步行导航] 开始安全路线规划...")
+                // 直接创建数组，避免类型转换崩溃
+                // Swift 桥接 Objective-C 时，需要直接传递数组
+                let startPoints: [AMapNaviPoint] = [startPoint]
+                let endPoints: [AMapNaviPoint] = [endPoint]
                 
-                // 使用地图API进行路线规划，避免SDK崩溃
-                self.planRouteUsingMapAPI(to: destination)
-                print("✅ [步行导航] 使用地图API进行路线规划，避免崩溃")
-            } catch {
-                print("❌ [步行导航] 规划路线时发生错误: \(error)")
+                print("🔍 [步行导航] 起点数组数量: \(startPoints.count), 终点数组数量: \(endPoints.count)")
+                
+                // 使用Swift桥接的方法名（SDK在Swift中提供简化方法名）
+                // Objective-C: calculateWalkRouteWithStartPoints:endPoints:
+                // Swift桥接后: calculateWalkRoute(withStart:end:)
+                // 注意：必须确保在主线程调用，并且数组非空
+                let ok = wm.calculateWalkRoute(withStart: startPoints, end: endPoints)
+                
+                if ok {
+                    print("🗺️ [步行导航] 已发起导航算路: 成功提交")
+                    print("⏳ [步行导航] 等待路线规划回调...")
+                    // 成功后会触发 walkManager(_:onCalculateRouteSuccess:) 回调
+                    // 回调中会自动调用 startGPSNavi()
+                } else {
+                    print("❌ [步行导航] 导航算路提交失败")
+                    self.isCalculatingRoute = false
+                }
             }
         }
     }
@@ -291,10 +328,20 @@ class WalkingNavigationManager: NSObject, ObservableObject {
     
     /// 清理资源
     private func cleanup() {
+        // 停止定时器
+        navigationTimer?.invalidate()
+        navigationTimer = nil
+        
+        // 停止位置更新
+        locationManager.stopUpdatingLocation()
+        
+        // 移除导航视图
         if let walkView = walkView {
             walkManager?.removeDataRepresentative(walkView)
         }
-        walkManager?.delegate = nil
+        
+        // 清理代理（但保持 walkManager 和 walkView 引用，防止崩溃）
+        // walkManager?.delegate = nil // 注释掉，避免在导航过程中清理导致崩溃
     }
     
     deinit {
@@ -307,40 +354,93 @@ extension WalkingNavigationManager: AMapNaviWalkManagerDelegate {
     
     /// 路线规划成功回调
     func walkManager(_ walkManager: AMapNaviWalkManager, onCalculateRouteSuccess type: AMapNaviRoutePlanType) {
-        print("✅ [步行导航] 路线规划成功")
+        print("✅ [步行导航] 路线规划成功，类型: \(type.rawValue)")
         
-        DispatchQueue.main.async {
-            self.currentInstruction = "路线规划成功，开始导航"
+        // 重置路线规划标志
+        isCalculatingRoute = false
+        
+        // 从导航管理器获取路线信息（这是关键！）
+        if let route = walkManager.naviRoute {
+            let routeDistance = route.routeLength
+            let routeTime = route.routeTime
+            print("📏 [步行导航] 路线距离: \(routeDistance)米, 预计时间: \(routeTime)秒")
+            
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else {
+                    print("⚠️ [步行导航] self已释放，跳过导航启动")
+                    return
+                }
+                
+                // 更新路线距离（使用真实路线距离，而非直线距离）
+                self.distanceToDestination = Double(routeDistance)
+                
+                // 计算预计到达时间
+                let timeInMinutes = routeTime / 60
+                if timeInMinutes < 60 {
+                    self.estimatedArrivalTime = "\(timeInMinutes)分钟"
+                } else {
+                    let hours = timeInMinutes / 60
+                    let minutes = timeInMinutes % 60
+                    self.estimatedArrivalTime = "\(hours)小时\(minutes)分钟"
+                }
+                
+                self.currentInstruction = "路线规划成功，开始导航"
+                print("✅ [步行导航] 路线数据已更新 - 距离: \(routeDistance)米")
+            }
         }
         
-        // 语音播报
-        speakInstruction("路线规划成功，开始导航")
-        
-        // 开始实时导航
-        walkManager.startGPSNavi()
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else {
+                print("⚠️ [步行导航] self已释放，跳过导航启动")
+                return
+            }
+            
+            // 确保 walkManager 仍然有效
+            guard let wm = self.walkManager else {
+                print("❌ [步行导航] walkManager 不存在，无法启动导航")
+                return
+            }
+            
+            // 语音播报
+            self.speakInstruction("路线规划成功，开始导航")
+            
+            // 停止实时导航状态更新（避免用直线距离覆盖路线距离）
+            self.stopRealTimeNavigationUpdate()
+            
+            // 开始实时导航（在导航视图已添加为数据代表后，会自动显示导航UI）
+            wm.startGPSNavi()
+            print("🚀 [步行导航] 已启动GPS导航")
+        }
     }
     
     /// 路线规划失败回调
     func walkManager(_ walkManager: AMapNaviWalkManager, onCalculateRouteFailure error: Error) {
         print("❌ [步行导航] 路线规划失败: \(error.localizedDescription)")
+        print("🔍 [步行导航] 错误详情: \(error)")
         
-        DispatchQueue.main.async {
+        // 重置路线规划标志
+        isCalculatingRoute = false
+        
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
             self.currentInstruction = "路线规划失败"
             self.isNavigating = false
+            self.speakInstruction("路线规划失败")
         }
-        
-        speakInstruction("路线规划失败")
     }
     
     /// 导航诱导信息更新
     func walkManager(_ walkManager: AMapNaviWalkManager, updateNaviInfo naviInfo: AMapNaviInfo?) {
         guard let naviInfo = naviInfo else { return }
         
-        DispatchQueue.main.async {
-            // 更新导航信息
+        // 使用 [weak self] 防止崩溃
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            // 更新导航信息（使用路线剩余距离，而非直线距离）
             self.currentInstruction = naviInfo.nextRoadName ?? "继续前进"
             self.distanceToNext = Double(naviInfo.segmentRemainDistance)
-            self.distanceToDestination = Double(naviInfo.routeRemainDistance)
+            self.distanceToDestination = Double(naviInfo.routeRemainDistance) // 路线剩余距离
             self.currentRoadName = naviInfo.nextRoadName ?? ""
             
             // 计算预计到达时间
@@ -354,9 +454,13 @@ extension WalkingNavigationManager: AMapNaviWalkManagerDelegate {
             }
             
             // 语音播报重要指令
-            if naviInfo.segmentRemainDistance < 50 && !naviInfo.nextRoadName.isEmpty {
-                self.speakInstruction("\(naviInfo.segmentRemainDistance)米后\(naviInfo.nextRoadName)")
+            let distance = naviInfo.segmentRemainDistance
+            let roadName = naviInfo.nextRoadName ?? ""
+            if distance < 50 && !roadName.isEmpty {
+                self.speakInstruction("\(distance)米后\(roadName)")
             }
+            
+            print("📍 [导航信息] 距离目的地: \(Int(naviInfo.routeRemainDistance))米, 下段距离: \(naviInfo.segmentRemainDistance)米")
         }
     }
     
@@ -364,7 +468,8 @@ extension WalkingNavigationManager: AMapNaviWalkManagerDelegate {
     func walkManager(_ walkManager: AMapNaviWalkManager, didArriveDestination destination: AMapNaviPoint) {
         print("🎯 [步行导航] 已到达目的地")
         
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
             self.currentInstruction = "已到达目的地"
             self.isNavigating = false
         }
@@ -376,8 +481,15 @@ extension WalkingNavigationManager: AMapNaviWalkManagerDelegate {
     func walkManager(_ walkManager: AMapNaviWalkManager, didStartNavi naviMode: AMapNaviMode) {
         print("🚀 [步行导航] 导航已开始，模式: \(naviMode.rawValue)")
         
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
             self.currentInstruction = "导航已开始"
+            
+            // 确保导航视图已添加到管理器
+            if let walkView = self.walkView {
+                walkManager.addDataRepresentative(walkView)
+                print("✅ [步行导航] 导航视图已确认添加到管理器")
+            }
         }
     }
     
@@ -385,7 +497,8 @@ extension WalkingNavigationManager: AMapNaviWalkManagerDelegate {
     func walkManager(_ walkManager: AMapNaviWalkManager, didStopNavi naviMode: AMapNaviMode) {
         print("🛑 [步行导航] 导航已停止，模式: \(naviMode.rawValue)")
         
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
             self.currentInstruction = "导航已停止"
             self.isNavigating = false
         }
@@ -459,6 +572,24 @@ extension WalkingNavigationManager: AMapNaviWalkViewDelegate {
     /// 获取导航视图（供SwiftUI使用）
     func getWalkView() -> AMapNaviWalkView? {
         return walkView
+    }
+    
+    /// 设置导航视图（供SwiftUI使用，确保视图引用正确）
+    func setWalkView(_ view: AMapNaviWalkView) {
+        // 如果已有视图，先移除旧视图
+        if let oldView = walkView {
+            walkManager?.removeDataRepresentative(oldView)
+        }
+        
+        // 设置新视图
+        walkView = view
+        walkView?.delegate = self
+        
+        // 添加到管理器
+        if let wm = walkManager {
+            wm.addDataRepresentative(view)
+            print("✅ [步行导航] 导航视图已更新并添加到管理器")
+        }
     }
     
     /// 获取导航管理器（供SwiftUI使用）
@@ -579,10 +710,21 @@ extension WalkingNavigationManager {
         
         // 停止之前的定时器
         navigationTimer?.invalidate()
+        navigationTimer = nil
         
         // 创建新的定时器，每2秒更新一次
-        navigationTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            self?.updateNavigationStatus()
+        // 使用 weak self 防止内存泄漏
+        navigationTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] timer in
+            guard let self = self else {
+                timer.invalidate()
+                return
+            }
+            self.updateNavigationStatus()
+        }
+        
+        // 将定时器添加到 RunLoop 确保正常工作
+        if let timer = navigationTimer {
+            RunLoop.main.add(timer, forMode: .common)
         }
     }
     
@@ -595,26 +737,35 @@ extension WalkingNavigationManager {
     
     /// 更新导航状态
     private func updateNavigationStatus() {
+        // 注意：如果导航已启动，应该由 updateNaviInfo 更新距离
+        // 这里的定时器更新主要用于导航启动前的状态显示
         guard isNavigating,
               let currentLocation = locationManager.location?.coordinate,
               let destination = destination else {
-            print("⚠️ [实时导航] 导航状态更新条件不满足 - isNavigating: \(isNavigating), currentLocation: \(locationManager.location?.coordinate != nil), destination: \(destination != nil)")
-            print("🔍 [实时导航] 详细状态 - isNavigating: \(isNavigating), 定位坐标: \(locationManager.location?.coordinate ?? CLLocationCoordinate2D(latitude: 0, longitude: 0)), 目的地: \(destination ?? CLLocationCoordinate2D(latitude: 0, longitude: 0))")
+            // 只在调试时打印，减少日志
             return
         }
         
-        // 计算实时距离
+        // 只有在导航管理器未提供路线数据时才使用直线距离
+        // 一旦路线规划成功，navigationRoute 会被更新，这里就不再使用直线距离
+        guard walkManager?.naviRoute == nil else {
+            // 导航管理器已提供路线数据，不需要直线距离更新
+            return
+        }
+        
+        // 计算实时距离（仅用于导航启动前的状态）
         let distance = calculateDistance(from: currentLocation, to: destination)
         
         // 更新导航状态
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             
-            self.distanceToDestination = distance
-            self.updateNavigationInstruction()
-            self.updateEstimatedArrivalTime()
-            
-            print("📍 [实时导航] 距离: \(Int(distance))米, 指令: \(self.currentInstruction)")
+            // 只在没有路线数据时更新距离
+            if self.walkManager?.naviRoute == nil {
+                self.distanceToDestination = distance
+                self.updateNavigationInstruction()
+                self.updateEstimatedArrivalTime()
+            }
         }
     }
     
