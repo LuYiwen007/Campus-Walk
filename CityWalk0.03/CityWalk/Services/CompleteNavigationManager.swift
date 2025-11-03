@@ -154,8 +154,8 @@ class CompleteNavigationManager: NSObject, ObservableObject {
     }
     
     private func generateNavigationInstruction() {
-        guard let currentLocation = currentLocation,
-              let destination = destination else { return }
+        guard currentLocation != nil,
+              destination != nil else { return }
         
         let distance = distanceToDestination
         

@@ -41,7 +41,6 @@ class MessageViewModel: ObservableObject {
         let userMessage = Message(content: inputText, isUser: true, timestamp: Date())
         messages.append(userMessage)
         print("📝📝📝 User message added to messages array 📝📝📝")
-        let lower = inputText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         // 移除越秀公园路线推荐
         // 之后的对话都走大模型
         let botMessage = Message(content: "", isUser: false, timestamp: Date())

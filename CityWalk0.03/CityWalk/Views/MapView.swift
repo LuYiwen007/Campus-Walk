@@ -21,8 +21,6 @@ struct MapView: View {
     
     // 高德导航相关状态
     @StateObject private var walkNavManager = WalkingNavigationManager.shared
-    @State private var showAMapNavigation = false
-    @State private var navigationDestination: CLLocationCoordinate2D? = nil
     
     // 已切换为高德地图，不再需要MapCameraPosition
     var body: some View {
@@ -45,10 +43,10 @@ struct MapView: View {
                         Spacer()
                         Button(action: {
                             if isNavigationMode {
-                                // 如果已经在导航模式，启动高德导航
+                                // 直接启动原地图上的导航功能
                                 if let destination = destinationLocation {
-                                    navigationDestination = destination
-                                    showAMapNavigation = true
+                                    // 触发导航：会通过 AMapViewRepresentable 的 Coordinator 启动
+                                    // 导航UI将显示在原地图上，不会弹出新界面
                                     walkNavManager.startWalkingNavigation(to: destination)
                                 }
                             } else {
@@ -77,34 +75,17 @@ struct MapView: View {
                     .allowsHitTesting(false)
             }
         }
-        .sheet(isPresented: $showAMapNavigation) {
-            if let destination = navigationDestination {
-                AMapNaviWalkViewRepresentable(
-                    isNavigating: $walkNavManager.isNavigating,
-                    destination: destination,
-                    onNavigationStart: {
-                        print("🚀 [MapView] 高德导航开始")
-                    },
-                    onNavigationStop: {
-                        print("🛑 [MapView] 高德导航停止")
-                        showAMapNavigation = false
-                        isNavigationMode = false
-                    }
-                )
-                .ignoresSafeArea()
-            }
-        }
         .onAppear {
             // 路线详情功能已移除
         }
-        .onChange(of: centerCoordinate?.latitude) { _ in mapViewId = UUID() }
-        .onChange(of: centerCoordinate?.longitude) { _ in mapViewId = UUID() }
-        .onChange(of: routeCoordinates?.first?.latitude) { _ in mapViewId = UUID() }
-        .onChange(of: routeCoordinates?.last?.longitude) { _ in mapViewId = UUID() }
-        .onChange(of: routeInfo) { newValue in
+        .onChange(of: centerCoordinate?.latitude) { _, _ in mapViewId = UUID() }
+        .onChange(of: centerCoordinate?.longitude) { _, _ in mapViewId = UUID() }
+        .onChange(of: routeCoordinates?.first?.latitude) { _, _ in mapViewId = UUID() }
+        .onChange(of: routeCoordinates?.last?.longitude) { _, _ in mapViewId = UUID() }
+        .onChange(of: routeInfo) { _, _ in
             // 路线详情功能已移除
         }
-        .onChange(of: startCoordinateBinding) { _ in mapViewId = UUID() }
-        .onChange(of: destinationLocation) { _ in mapViewId = UUID() }
+        .onChange(of: startCoordinateBinding) { _, _ in mapViewId = UUID() }
+        .onChange(of: destinationLocation) { _, _ in mapViewId = UUID() }
     }
 } 

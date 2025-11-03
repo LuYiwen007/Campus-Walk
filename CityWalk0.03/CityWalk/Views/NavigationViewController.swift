@@ -128,7 +128,7 @@ extension NavigationViewController: AMapSearchDelegate {
         mapView.removeOverlays(mapView.overlays)
         
         // 绘制新路线
-        if let steps = path.steps as? [AMapStep] {
+        if let steps = path.steps {
             var coordinates: [CLLocationCoordinate2D] = []
             
             for step in steps {
