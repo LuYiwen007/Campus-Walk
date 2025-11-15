@@ -15,14 +15,14 @@ struct SettingsView: View {
                 // 偏好设置分区
                 Section("偏好设置") {
                     Toggle("跟随系统", isOn: $settings.useSystemTheme)
-                        .onChange(of: settings.useSystemTheme) { _, _ in
+                        .onChange(of: settings.useSystemTheme) { _ in
                             // 切换跟随系统主题时触发触感反馈
                             settings.performHapticFeedback()
                         }
                     
                     if !settings.useSystemTheme {
                         Toggle("深色模式", isOn: $settings.isDarkMode)
-                            .onChange(of: settings.isDarkMode) { _, _ in
+                            .onChange(of: settings.isDarkMode) { _ in
                                 // 切换深色模式时触发触感反馈
                                 settings.performHapticFeedback()
                             }
@@ -32,7 +32,7 @@ struct SettingsView: View {
                         Text("字体大小")
                             .font(.system(size: settings.fontSize))
                         Slider(value: $settings.fontSize, in: 12...24, step: 1)
-                            .onChange(of: settings.fontSize) { _, _ in
+                            .onChange(of: settings.fontSize) { _ in
                                 // 调整字体大小时触发触感反馈并通知全局字体变化
                                 settings.performHapticFeedback()
                                 NotificationCenter.default.post(name: NSNotification.Name("FontSizeChanged"), object: nil)
@@ -45,17 +45,17 @@ struct SettingsView: View {
                 // 聊天设置分区
                 Section("聊天设置") {
                     Toggle<Text>("通知", isOn: $settings.enableNotifications)
-                        .onChange(of: settings.enableNotifications) { _, _ in
+                        .onChange(of: settings.enableNotifications) { _ in
                             settings.performHapticFeedback()
                         }
                     
                     Toggle<Text>("声音", isOn: $settings.enableSound)
-                        .onChange(of: settings.enableSound) { _, _ in
+                        .onChange(of: settings.enableSound) { _ in
                             settings.performHapticFeedback()
                         }
                     
                     Toggle<Text>("触感", isOn: $settings.enableHaptics)
-                        .onChange(of: settings.enableHaptics) { _, _ in
+                        .onChange(of: settings.enableHaptics) { _ in
                             settings.performHapticFeedback()
                         }
                     
@@ -63,7 +63,7 @@ struct SettingsView: View {
                         Text("简体中文").tag("简体中文")
                         Text("English").tag("English")
                     }
-                    .onChange(of: settings.language) { _, _ in
+                    .onChange(of: settings.language) { _ in
                         // 切换语言时触发触感反馈并通知全局语言变化
                         settings.performHapticFeedback()
                         NotificationCenter.default.post(name: NSNotification.Name("LanguageChanged"), object: nil)
@@ -128,7 +128,7 @@ struct SettingsView: View {
             .sheet(isPresented: $showTerms) {
                 TermsView(isShowing: $showTerms)
             }
-            .onChange(of: settings.isDarkMode) { oldValue, newValue in
+            .onChange(of: settings.isDarkMode) { newValue in
                 // 切换深色/浅色模式时，动态修改全局界面风格
                 if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
                     windowScene.windows.first?.overrideUserInterfaceStyle = newValue ? .dark : .light

@@ -284,10 +284,24 @@ struct RouteDetailView: View {
                 }
                 .padding()
                 .frame(maxWidth: .infinity)
-                .background(navigationIndex == nil || (navigationIndex! < places.count - 1) ? Color.blue : Color.gray)
+                .background({
+                    if let idx = navigationIndex, idx < places.count - 1 {
+                        return Color.blue
+                    } else {
+                        return Color.gray
+                    }
+                }())
                 .foregroundColor(.white)
                 .cornerRadius(25)
-                .disabled(isLoadingPOI || (navigationIndex != nil && navigationIndex! >= places.count - 1))
+                .disabled({
+                    if isLoadingPOI {
+                        return true
+                    }
+                    if let idx = navigationIndex {
+                        return idx >= places.count - 1
+                    }
+                    return false
+                }())
             }
             .padding(.top, 8)
             .padding(.bottom, 16)
@@ -336,8 +350,7 @@ class LocationDelegate: NSObject, CLLocationManagerDelegate, ObservableObject {
 // 辅助：高德POI搜索
 class AMapPOISearchHelper {
     static func searchPOI(keyword: String, completion: @escaping (CLLocationCoordinate2D?) -> Void) {
-        // 使用统一的API Key配置
-        let apiKey = APIKeyConfig.getCurrentAPIKey()
+        let apiKey = "ea6ffe534577fb90a8ce52a72c0aa121"
         let city = "广州"
         let encodedKeyword = keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         let urlString = "https://restapi.amap.com/v3/place/text?key=\(apiKey)&keywords=\(encodedKeyword)&city=\(city)&output=JSON&offset=1&page=1"

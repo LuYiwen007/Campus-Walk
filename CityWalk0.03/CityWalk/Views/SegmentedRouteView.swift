@@ -149,10 +149,7 @@ struct SegmentedRouteView: View {
         // 使用当前段的终点作为 AR 目的地；若无则使用起点；若都无则不弹出
         guard let dest = currentRouteData.last ?? currentRouteData.first else { return }
         let vc = UIHostingController(rootView: ARNavigationView(destination: dest))
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = windowScene.windows.first {
-            window.rootViewController?.present(vc, animated: true)
-        }
+        UIApplication.shared.windows.first?.rootViewController?.present(vc, animated: true)
     }
     
     // 加载路线分段数据
