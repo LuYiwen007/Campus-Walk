@@ -19,9 +19,6 @@ struct MapView: View {
     // 新增：导航模式
     @Binding var isNavigationMode: Bool
     
-    // 高德导航相关状态
-    @StateObject private var walkNavManager = WalkingNavigationManager.shared
-    
     // 已切换为高德地图，不再需要MapCameraPosition
     var body: some View {
         let _ = print("[MapView] startCoordinateBinding=\(String(describing: startCoordinateBinding)), destinationLocation=\(String(describing: destinationLocation))")
@@ -42,17 +39,7 @@ struct MapView: View {
                     HStack {
                         Spacer()
                         Button(action: {
-                            if isNavigationMode {
-                                // 直接启动原地图上的导航功能
-                                if let destination = destinationLocation {
-                                    // 触发导航：会通过 AMapViewRepresentable 的 Coordinator 启动
-                                    // 导航UI将显示在原地图上，不会弹出新界面
-                                    walkNavManager.startWalkingNavigation(to: destination)
-                                }
-                            } else {
-                                // 切换导航模式
-                                isNavigationMode.toggle()
-                            }
+                            isNavigationMode.toggle()
                         }) {
                             Image(systemName: isNavigationMode ? "location.fill" : "location")
                                 .font(.system(size: 20))
@@ -78,14 +65,14 @@ struct MapView: View {
         .onAppear {
             // 路线详情功能已移除
         }
-        .onChange(of: centerCoordinate?.latitude) { _, _ in mapViewId = UUID() }
-        .onChange(of: centerCoordinate?.longitude) { _, _ in mapViewId = UUID() }
-        .onChange(of: routeCoordinates?.first?.latitude) { _, _ in mapViewId = UUID() }
-        .onChange(of: routeCoordinates?.last?.longitude) { _, _ in mapViewId = UUID() }
-        .onChange(of: routeInfo) { _, _ in
+        .onChange(of: centerCoordinate?.latitude) { _ in mapViewId = UUID() }
+        .onChange(of: centerCoordinate?.longitude) { _ in mapViewId = UUID() }
+        .onChange(of: routeCoordinates?.first?.latitude) { _ in mapViewId = UUID() }
+        .onChange(of: routeCoordinates?.last?.longitude) { _ in mapViewId = UUID() }
+        .onChange(of: routeInfo) { newValue in
             // 路线详情功能已移除
         }
-        .onChange(of: startCoordinateBinding) { _, _ in mapViewId = UUID() }
-        .onChange(of: destinationLocation) { _, _ in mapViewId = UUID() }
+        .onChange(of: startCoordinateBinding) { _ in mapViewId = UUID() }
+        .onChange(of: destinationLocation) { _ in mapViewId = UUID() }
     }
 } 

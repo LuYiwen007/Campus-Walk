@@ -14,17 +14,7 @@ import AMapNaviKit
 
 // 新增AppDelegate类用于高德Key初始化
 class AppDelegate: NSObject, UIApplicationDelegate {
-    var window: UIWindow?
-    
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
-        // 延迟初始化高德SDK，避免启动时的冲突
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            self.initializeAMapSDK()
-        }
-        return true
-    }
-    
-    private func initializeAMapSDK() {
         // 新版高德SDK隐私合规接口，必须在任何高德SDK对象初始化前调用
         AMapLocationManager.updatePrivacyShow(.didShow, privacyInfo: .didContain)
         AMapLocationManager.updatePrivacyAgree(.didAgree)
@@ -36,8 +26,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // 统一设置 Key 与 HTTPS
         AMapServices.shared().enableHTTPS = true
         AMapServices.shared().apiKey = "4c6e7aa728f408e1fc754200f5bed2e4"
-        
-        print("✅ [AppDelegate] 高德SDK初始化完成")
+        return true
     }
 }
 

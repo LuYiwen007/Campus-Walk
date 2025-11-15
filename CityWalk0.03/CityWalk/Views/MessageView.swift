@@ -171,7 +171,7 @@ struct MessageView: View {
                 }
                 .background(Color(.systemGray6))
                 .frame(maxHeight: mapHeight > 0 ? UIScreen.main.bounds.height * 0.5 : .infinity)
-                .onChange(of: viewModel.messages.count) { _, _ in
+                .onChange(of: viewModel.messages.count) { _ in
                     if let lastMessage = viewModel.messages.last {
                         withAnimation {
                             proxy.scrollTo(lastMessage.id, anchor: .bottom)
@@ -235,10 +235,7 @@ struct MessageView: View {
                         .default(Text("AR 识别")) {
                             // 打开 AR 识别入口
                             let vc = UIHostingController(rootView: ARBuildingInfoView())
-                            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                               let window = windowScene.windows.first {
-                                window.rootViewController?.present(vc, animated: true)
-                            }
+                            UIApplication.shared.windows.first?.rootViewController?.present(vc, animated: true)
                         },
                         .default(Text("从相册选择")) {
                             imagePickerSource = .photoLibrary
@@ -334,9 +331,7 @@ struct MessageView: View {
                 object: nil,
                 queue: .main
             ) { _ in
-                Task { @MainActor in
-                    viewModel.messages.removeAll()
-                }
+                viewModel.messages.removeAll()
             }
             // 聊天页面出现时自动滚动到底部
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {

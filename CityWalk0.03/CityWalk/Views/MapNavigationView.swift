@@ -144,8 +144,8 @@ struct MapViewRepresentable: UIViewRepresentable {
         
         func mapView(_ mapView: MAMapView!, rendererFor overlay: MAOverlay!) -> MAOverlayRenderer! {
             // 渲染路线覆盖层
-            if let polyline = overlay as? MAPolyline {
-                let renderer = MAPolylineRenderer(polyline: polyline)
+            if overlay is MAPolyline {
+                let renderer = MAPolylineRenderer(polyline: overlay as! MAPolyline)
                 renderer?.strokeColor = UIColor.blue
                 renderer?.lineWidth = 5.0
                 return renderer

@@ -154,8 +154,8 @@ class CompleteNavigationManager: NSObject, ObservableObject {
     }
     
     private func generateNavigationInstruction() {
-        guard currentLocation != nil,
-              destination != nil else { return }
+        guard let currentLocation = currentLocation,
+              let destination = destination else { return }
         
         let distance = distanceToDestination
         
@@ -203,6 +203,15 @@ class CompleteNavigationManager: NSObject, ObservableObject {
         utterance.voice = AVSpeechSynthesisVoice(language: "zh-CN")
         
         speechSynthesizer.speak(utterance)
+    }
+    
+    deinit {
+        // 清理所有资源，防止内存泄漏
+        navigationTimer?.invalidate()
+        navigationTimer = nil
+        locationManager.stopUpdatingLocation()
+        locationManager.delegate = nil
+        print("✅ [CompleteNavigationManager] 资源已清理")
     }
 }
 

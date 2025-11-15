@@ -97,13 +97,7 @@ struct UserProfileView: View {
                                 .foregroundColor(Color(.systemGray3))
                                 .padding(12)
                         }
-                        .padding(.top, {
-                            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                               let window = windowScene.windows.first {
-                                return window.safeAreaInsets.top
-                            }
-                            return 44.0
-                        }())
+                        .padding(.top, UIApplication.shared.windows.first?.safeAreaInsets.top ?? 44)
                         .padding(.trailing, 16)
                     , alignment: .topTrailing
                     )
@@ -114,13 +108,7 @@ struct UserProfileView: View {
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .background(Color(.systemBackground))
                         .ignoresSafeArea()
-                        .padding(.top, {
-                            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                               let window = windowScene.windows.first {
-                                return window.safeAreaInsets.top
-                            }
-                            return 44.0
-                        }())
+                        .padding(.top, UIApplication.shared.windows.first?.safeAreaInsets.top ?? 44)
                         .transition(.opacity)
                 }
             }
