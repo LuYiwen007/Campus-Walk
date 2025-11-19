@@ -204,14 +204,25 @@ class WalkingNavigationManager: NSObject, ObservableObject {
     
     /// 清理资源
     private func cleanup() {
+        // 停止位置更新
+        locationManager.stopUpdatingLocation()
+        
+        // 清理 delegate，防止野指针
+        locationManager.delegate = nil
+        
+        // 清理高德导航组件
         if let walkView = walkView {
             walkManager?.removeDataRepresentative(walkView)
         }
         walkManager?.delegate = nil
+        
+        // 清理搜索API
+        searchAPI?.delegate = nil
     }
     
     deinit {
         cleanup()
+        print("✅ [WalkingNavigationManager] 资源已清理")
     }
 }
 

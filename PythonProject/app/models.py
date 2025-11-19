@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, JSON, DECIMAL
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from datetime import datetime
 from .db import Base
@@ -46,7 +46,34 @@ class RouteLocations(Base):
     conversation: Mapped[Conversation] = relationship("Conversation")
 
 
-# 新增：POI 缓存表
+# 新增：POI表（对应MySQL的pois表）
+class POI(Base):
+    __tablename__ = "pois"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    poi_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)  # POI唯一标识（高德地图的uid）
+    name: Mapped[str] = mapped_column(String(255), nullable=False)  # 建筑/地点名称
+    latitude: Mapped[float] = mapped_column(DECIMAL(10, 7), nullable=False)  # 纬度
+    longitude: Mapped[float] = mapped_column(DECIMAL(10, 7), nullable=False)  # 经度
+    address: Mapped[str] = mapped_column(String(500), nullable=True)  # 详细地址
+    description: Mapped[str] = mapped_column(Text, nullable=True)  # 描述信息
+    poi_type: Mapped[str] = mapped_column(String(50), nullable=True, index=True)  # 类型：building, landmark, restaurant等
+    type_code: Mapped[str] = mapped_column(String(20), nullable=True)  # 高德地图类型编码
+    distance: Mapped[float] = mapped_column(DECIMAL(10, 2), nullable=True)  # 距离（米）
+    phone: Mapped[str] = mapped_column(String(50), nullable=True)  # 联系电话
+    website: Mapped[str] = mapped_column(String(255), nullable=True)  # 网址
+    business_area: Mapped[str] = mapped_column(String(100), nullable=True)  # 所属商圈
+    province: Mapped[str] = mapped_column(String(50), nullable=True)  # 省份
+    city: Mapped[str] = mapped_column(String(50), nullable=True, index=True)  # 城市
+    district: Mapped[str] = mapped_column(String(50), nullable=True)  # 区县
+    adcode: Mapped[str] = mapped_column(String(10), nullable=True)  # 区域编码
+    rating: Mapped[float] = mapped_column(DECIMAL(3, 1), nullable=True)  # 评分（0-5）
+    images: Mapped[dict] = mapped_column(JSON, nullable=True)  # 图片列表（JSON数组）
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# 新增：POI 缓存表（旧版，用于兼容）
 class PoiCache(Base):
     __tablename__ = "poi_cache"
 
@@ -59,6 +86,23 @@ class PoiCache(Base):
     raw_json: Mapped[dict] = mapped_column(JSON, default=dict)
     gmt_create: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     gmt_modified: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# 新增：POI查询结果缓存表（对应MySQL的poi_caches表）
+class POICache(Base):
+    __tablename__ = "poi_caches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    latitude: Mapped[float] = mapped_column(DECIMAL(10, 7), nullable=False)  # 缓存中心点纬度
+    longitude: Mapped[float] = mapped_column(DECIMAL(10, 7), nullable=False)  # 缓存中心点经度
+    radius: Mapped[float] = mapped_column(DECIMAL(10, 2), nullable=False)  # 缓存半径（米）
+    heading: Mapped[float] = mapped_column(DECIMAL(5, 2), nullable=True)  # 朝向（可选）
+    fov: Mapped[float] = mapped_column(DECIMAL(5, 2), nullable=True)  # 视野角度（可选）
+    cache_key: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)  # 缓存键（唯一）
+    cache_data: Mapped[dict] = mapped_column(JSON, nullable=False)  # 缓存的POI数据（JSON数组）
+    hit_count: Mapped[int] = mapped_column(Integer, default=0)  # 命中次数
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)  # 过期时间
 
 
 # 新增：AR 会话表
@@ -192,7 +236,30 @@ class UserARSession(Base):
     gmt_modified: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
-# 新增：AR识别记录表
+# 新增：AR识别记录表（对应ar_recognition_records表）
+class ARRecognitionRecord(Base):
+    __tablename__ = "ar_recognition_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=True, index=True)  # 用户ID（可选）
+    session_id: Mapped[str] = mapped_column(String(64), nullable=True, index=True)  # 会话ID（可选）
+    latitude: Mapped[float] = mapped_column(DECIMAL(10, 7), nullable=False)  # 识别时的纬度
+    longitude: Mapped[float] = mapped_column(DECIMAL(10, 7), nullable=False)  # 识别时的经度
+    heading: Mapped[float] = mapped_column(DECIMAL(5, 2), nullable=True)  # 设备朝向（0-360度）
+    fov: Mapped[float] = mapped_column(DECIMAL(5, 2), nullable=True)  # 视野角度（度）
+    radius: Mapped[float] = mapped_column(DECIMAL(10, 2), nullable=True)  # 搜索半径（米）
+    detected_poi_id: Mapped[int] = mapped_column(Integer, ForeignKey("pois.id"), nullable=True, index=True)  # 识别到的POI ID（外键）
+    confidence: Mapped[float] = mapped_column(DECIMAL(3, 2), nullable=True)  # 识别置信度（0-1）
+    recognition_mode: Mapped[str] = mapped_column(String(16), default="auto")  # 识别模式：auto/manual
+    device_info: Mapped[str] = mapped_column(String(255), nullable=True)  # 设备信息
+    app_version: Mapped[str] = mapped_column(String(32), nullable=True)  # 应用版本
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)  # 创建时间
+
+    # 关联关系
+    detected_poi: Mapped["POI"] = relationship("POI", foreign_keys=[detected_poi_id])
+
+
+# 新增：AR识别记录表（旧版，用于兼容）
 class ARRecognitionLog(Base):
     __tablename__ = "ar_recognition_logs"
 

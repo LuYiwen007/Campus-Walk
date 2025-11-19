@@ -59,8 +59,11 @@ class NavigationViewController: UIViewController {
         guard let search = search else { return }
         
         // 计算从第一个点到最后一个点的步行路线
-        let start = communityRoutes.first!
-        let end = communityRoutes.last!
+        guard let start = communityRoutes.first,
+              let end = communityRoutes.last else {
+            print("❌ [导航] 路线点数组为空，无法计算路线")
+            return
+        }
         
         let request = AMapWalkingRouteSearchRequest()
         request.origin = AMapGeoPoint.location(withLatitude: CGFloat(start.latitude), 

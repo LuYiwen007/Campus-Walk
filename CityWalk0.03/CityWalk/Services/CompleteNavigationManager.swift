@@ -204,6 +204,15 @@ class CompleteNavigationManager: NSObject, ObservableObject {
         
         speechSynthesizer.speak(utterance)
     }
+    
+    deinit {
+        // 清理所有资源，防止内存泄漏
+        navigationTimer?.invalidate()
+        navigationTimer = nil
+        locationManager.stopUpdatingLocation()
+        locationManager.delegate = nil
+        print("✅ [CompleteNavigationManager] 资源已清理")
+    }
 }
 
 // MARK: - 导航步骤数据模型

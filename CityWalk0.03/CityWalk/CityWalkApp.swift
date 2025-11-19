@@ -25,7 +25,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         MAMapView.updatePrivacyAgree(.didAgree)
         // 统一设置 Key 与 HTTPS
         AMapServices.shared().enableHTTPS = true
-        AMapServices.shared().apiKey = "ea6ffe534577fb90a8ce52a72c0aa121"
+        AMapServices.shared().apiKey = "4c6e7aa728f408e1fc754200f5bed2e4"
         return true
     }
 }
@@ -37,12 +37,23 @@ struct CityWalkApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             Item.self,
+            POI.self,  // 注册POI模型
+            ARRecognitionHistory.self,  // 注册AR识别历史模型
+            POICache.self,  // 注册POI缓存模型
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
         do {
             // 创建数据容器
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            let container = try ModelContainer(for: schema, configurations: [modelConfiguration])
+            
+            // 初始化数据管理器（在主线程同步初始化）
+            DispatchQueue.main.async {
+                POIManager.shared.setup(context: container.mainContext)
+                ARRecognitionHistoryManager.shared.setup(context: container.mainContext)
+            }
+            
+            return container
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }

@@ -284,10 +284,24 @@ struct RouteDetailView: View {
                 }
                 .padding()
                 .frame(maxWidth: .infinity)
-                .background(navigationIndex == nil || (navigationIndex! < places.count - 1) ? Color.blue : Color.gray)
+                .background({
+                    if let idx = navigationIndex, idx < places.count - 1 {
+                        return Color.blue
+                    } else {
+                        return Color.gray
+                    }
+                }())
                 .foregroundColor(.white)
                 .cornerRadius(25)
-                .disabled(isLoadingPOI || (navigationIndex != nil && navigationIndex! >= places.count - 1))
+                .disabled({
+                    if isLoadingPOI {
+                        return true
+                    }
+                    if let idx = navigationIndex {
+                        return idx >= places.count - 1
+                    }
+                    return false
+                }())
             }
             .padding(.top, 8)
             .padding(.bottom, 16)
