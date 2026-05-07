@@ -7,8 +7,6 @@ target 'CityWalk' do
   # 高德地图完整SDK
   pod 'AMapLocation' # 定位SDK
   pod 'AMapSearch', '~> 9.7.4'    # 搜索SDK
-  
-  # 高德导航SDK (包含MAMapKit和AMapNaviKit)
   pod 'AMapNavi', '~> 10.1.302'   # 导航SDK (包含地图和导航UI组件)
 
 end
