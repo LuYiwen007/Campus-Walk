@@ -1,358 +1,337 @@
 import SwiftUI
-import AMapNaviKit
-import AMapFoundationKit
-import AMapSearchKit
-import AMapLocationKit
 
-// 用户视图模型，管理登录状态、用户名、头像等
-class UserViewModel: ObservableObject {
-    @Published var isLoggedIn = false
-    @Published var username: String = "游客用户"
-    @Published var userAvatar: Image = Image(systemName: "person.circle.fill")
-    
-    // 登录方法，模拟登录逻辑
-    func login(username: String, password: String) -> Bool {
-        // TODO: 实现实际的登录逻辑
-        self.username = username
-        self.isLoggedIn = true
-        return true
-    }
-    
-    // 登出方法，重置用户信息
-    func logout() {
-        self.username = "游客用户"
-        self.isLoggedIn = false
-        self.userAvatar = Image(systemName: "person.circle.fill")
-    }
-    
-    // 更新头像方法
-    func updateAvatar(_ image: Image) {
-        self.userAvatar = image
-    }
-}
-
-// 用户资料页，支持登录、登出、修改头像、查看历史等
+/// 侧栏用户菜单（对齐原型 `SideMenu.tsx`：蓝色顶栏、白字、分组列表、底链隐私政策）
 struct UserProfileView: View {
+    /// 蓝色顶栏内，头像/昵称相对**屏幕物理顶部**的留白（父级对抽屉 `ignoresSafeArea(.top)` 时系统安全区为 0，需手动留出状态栏/灵动岛高度）。**改这里即可调「用户页上边距」**。
+    private let sideMenuHeaderTopSpacer: CGFloat = 95
+    /// 右上角关闭按钮距顶部的间距
+    private let sideMenuCloseButtonTopPadding: CGFloat = 75
+
     @Binding var isShowingProfile: Bool
-    @StateObject private var userViewModel = UserViewModel()
+    @EnvironmentObject private var auth: AuthViewModel
     @State private var showSettingsDrawer = false
+    @State private var showMainSettings = false
     @Environment(\.locale) var locale
-    
+
+    private var profileTitle: String {
+        guard auth.isLoggedIn else { return NSLocalizedString("请登录", comment: "") }
+        if let n = auth.user?.nickname, !n.isEmpty { return n }
+        return auth.user?.email ?? "已登录"
+    }
+
+    private var avatarInitial: String {
+        let t = profileTitle
+        guard let c = t.first else { return "用" }
+        return String(c)
+    }
+
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 if !showSettingsDrawer {
-                    VStack(alignment: .leading, spacing: 0) {
-                        // 顶部头像区
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(alignment: .center, spacing: 16) {
-                                userViewModel.userAvatar
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                                    .frame(width: 60, height: 60)
-                                    .clipShape(Circle())
-                                HStack(spacing: 8) {
-                                    Text(userViewModel.isLoggedIn ? userViewModel.username : NSLocalizedString("请登录", comment: ""))
-                                        .font(.system(size: 20, weight: .semibold))
-                                        .foregroundColor(.black)
-                                    Button(action: { withAnimation { showSettingsDrawer = true } }) {
-                                        Image(systemName: "pencil")
-                                            .foregroundColor(.gray)
-                                            .padding(8)
-                                            .background(Color(.systemGray6))
-                                            .clipShape(Circle())
-                                    }
-                                }
-                                Spacer()
-                            }
-                            .padding(.top, 60)
-                            .padding(.bottom, 18)
-                            .padding(.horizontal, 20)
-                        }
-                        Divider().padding(.bottom, 2)
-                        // 功能区
+                    ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
-                            DrawerItem(icon: "book", text: "联系人")
-                            DrawerItem(icon: "bell", text: "通知")
-                            DrawerItem(icon: "clock.arrow.circlepath", text: "版本历史", badge: "新")
-                            DrawerItem(icon: "headphones", text: "联系我们")
-                            DrawerItem(icon: "person.badge.plus", text: "添加团队成员", sub: "成员可访问公开信息...")
-                            DrawerItem(icon: "gearshape", text: "设置")
-                            DrawerItem(icon: "info.circle", text: "关于App")
-                            DrawerItem(icon: "star", text: "我的收藏")
-                            DrawerItem(icon: "doc.text", text: "我的文档")
-                            DrawerItem(icon: "creditcard", text: "支付与订单")
-                            DrawerItem(icon: "questionmark.circle", text: "帮助与反馈")
+                            blueHeader
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                SideMenuRow(icon: "book", title: "联系人", action: {})
+                                SideMenuRow(icon: "bell", title: "通知", action: {})
+                                SideMenuRow(icon: "clock.arrow.circlepath", title: "版本历史", badge: "新", action: {})
+                                SideMenuRow(icon: "person.2", title: "联系我们", action: {})
+                                SideMenuRow(
+                                    icon: "person.badge.plus",
+                                    title: "添加团队成员",
+                                    subtitle: "成员可以加入并管理...",
+                                    action: {}
+                                )
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.top, 24)
+
+                            Rectangle()
+                                .fill(CampusWalkUITheme.borderSubtle)
+                                .frame(height: 1)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 16)
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                SideMenuRow(icon: "gearshape", title: "设置") {
+                                    showMainSettings = true
+                                }
+                                SideMenuRow(icon: "info.circle", title: "关于App", action: {})
+                                SideMenuRow(icon: "star", title: "我的收藏", action: {})
+                                SideMenuRow(icon: "doc.text", title: "我的文档", action: {})
+                                SideMenuRow(icon: "creditcard", title: "支付与订单", action: {})
+                                SideMenuRow(icon: "questionmark.circle", title: "帮助与反馈", action: {})
+                            }
+                            .padding(.horizontal, 16)
+
+                            Rectangle()
+                                .fill(CampusWalkUITheme.borderSubtle)
+                                .frame(height: 1)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 16)
+
+                            Button(action: {}) {
+                                Text("隐私政策")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(CampusWalkUITheme.brandBlue)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 32)
+                            .padding(.bottom, 32)
                         }
-                        .padding(.horizontal, 8)
+                        .frame(minHeight: geometry.size.height, alignment: .top)
+                        .background(Color.white)
                     }
-                    .frame(width: geometry.size.width, height: geometry.size.height)
-                    .background(Color.white)
-                    .ignoresSafeArea()
-                    // 顶部右上角关闭按钮
-                    .overlay(
-                        Button(action: { withAnimation { isShowingProfile = false } }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 26, weight: .bold))
-                                .foregroundColor(Color(.systemGray3))
-                                .padding(12)
-                        }
-                        .padding(.top, UIApplication.shared.windows.first?.safeAreaInsets.top ?? 44)
-                        .padding(.trailing, 16)
-                    , alignment: .topTrailing
-                    )
                     .transition(.opacity)
                 }
+
                 if showSettingsDrawer {
                     SettingsDrawerView(isShowing: $showSettingsDrawer)
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .background(Color(.systemBackground))
-                        .ignoresSafeArea()
-                        .padding(.top, UIApplication.shared.windows.first?.safeAreaInsets.top ?? 44)
                         .transition(.opacity)
                 }
             }
+            .fullScreenCover(isPresented: $showMainSettings) {
+                SettingsView(isShowingSettings: $showMainSettings)
+            }
         }
     }
-}
 
-struct DrawerItem: View {
-    let icon: String
-    let text: String
-    var badge: String? = nil
-    var sub: String? = nil
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 16) {
-                Image(systemName: icon)
-                    .font(.system(size: 20, weight: .regular))
-                    .foregroundColor(.black)
-                    .frame(width: 28)
-                Text(text)
-                    .font(.system(size: 16))
-                    .foregroundColor(.black)
-                if let badge = badge {
-                    Text(badge)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.orange)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(Color.orange.opacity(0.15)))
+    private var blueHeader: some View {
+        ZStack(alignment: .topTrailing) {
+            CampusWalkUITheme.brandBlue
+
+            Button {
+                withAnimation { isShowingProfile = false }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.95))
+                    .padding(10)
+                    .background(Color.white.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .padding(.top, sideMenuCloseButtonTopPadding)
+            .padding(.trailing, 20)
+
+            VStack(alignment: .leading, spacing: 0) {
+                Spacer().frame(height: sideMenuHeaderTopSpacer)
+
+                HStack(alignment: .center, spacing: 16) {
+                    Text(avatarInitial)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.white)
+                        .frame(width: 56, height: 56)
+                        .background(Color.white.opacity(0.2))
+                        .clipShape(Circle())
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(profileTitle)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(.white)
+
+                        Button {
+                            withAnimation { showSettingsDrawer = true }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("编辑资料")
+                                    .font(.system(size: 14))
+                                Image(systemName: "arrow.right")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundStyle(.white.opacity(0.78))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Spacer(minLength: 0)
                 }
-                Spacer()
+                .padding(.horizontal, 24)
+                .padding(.bottom, 28)
             }
-            .padding(.vertical, 14)
-            if let sub = sub {
-                Text(sub)
-                    .font(.system(size: 12))
-                    .foregroundColor(.gray)
-                    .padding(.leading, 44)
-                    .padding(.bottom, 8)
-            }
-            Divider()
-                .padding(.leading, 44)
         }
-        .padding(.horizontal, 12)
     }
 }
 
-// 设置抽屉内容，极简分组、分割线、右箭头、支持多语言
+private struct SideMenuRow: View {
+    let icon: String
+    let title: String
+    var subtitle: String?
+    var badge: String?
+    var action: () -> Void
+
+    init(icon: String, title: String, subtitle: String? = nil, badge: String? = nil, action: @escaping () -> Void = {}) {
+        self.icon = icon
+        self.title = title
+        self.subtitle = subtitle
+        self.badge = badge
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: subtitle == nil ? .center : .top, spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(CampusWalkUITheme.textMuted)
+                    .frame(width: 20, alignment: .center)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(title)
+                            .font(.system(size: 14))
+                            .foregroundStyle(Color(red: 0.28, green: 0.30, blue: 0.33))
+                        if let badge {
+                            Text(badge)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(CampusWalkUITheme.brandBlue)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(CampusWalkUITheme.brandBlueMutedBg)
+                                .clipShape(Capsule())
+                        }
+                    }
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 12))
+                            .foregroundStyle(CampusWalkUITheme.textMuted)
+                            .multilineTextAlignment(.leading)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
+            .background(Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct SettingsDrawerView: View {
+    /// 顶栏在安全区之下的额外留白（与 `safeAreaInsets.top` 相加）。**想微调「设置」标题与灵动岛/状态栏距离时改这里。**
+    private let settingsDrawerTopExtraBelowSafeArea: CGFloat = 40
+    /// 父级对抽屉使用 `ignoresSafeArea(.top)` 时，`safeAreaInsets.top` 常为 0，用此值模拟状态栏 + 一点间距（约等于原先用 `windows` 垫的高度）。
+    private let settingsDrawerTopFallbackWhenNoSafeArea: CGFloat = 54
+
     @Binding var isShowing: Bool
     @Environment(\.locale) var locale
+
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Spacer()
-                Text(NSLocalizedString("设置", comment: ""))
-                    .font(.system(size: 18, weight: .semibold))
-                Spacer()
-                Button(NSLocalizedString("完成", comment: "")) {
-                    withAnimation { isShowing = false }
+        GeometryReader { geo in
+            let topInset = topPadding(safeTop: geo.safeAreaInsets.top)
+
+            VStack(spacing: 0) {
+                HStack {
+                    Spacer()
+                    Text(NSLocalizedString("设置", comment: ""))
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Color(red: 0.28, green: 0.30, blue: 0.33))
+                    Spacer()
+                    Button(NSLocalizedString("完成", comment: "")) {
+                        withAnimation { isShowing = false }
+                    }
+                    .font(.system(size: 16))
+                    .foregroundStyle(CampusWalkUITheme.textMuted)
                 }
-                .foregroundColor(.gray)
+                .padding(.top, topInset)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
+                .background(Color.white)
+
+                Rectangle()
+                    .fill(CampusWalkUITheme.borderSubtle)
+                    .frame(height: 1)
+
+                ScrollView {
+                    VStack(spacing: 0) {
+                        Group {
+                            SettingsItem(icon: "person", text: NSLocalizedString("账号管理", comment: ""))
+                            SettingsItem(icon: "lock", text: NSLocalizedString("安全设置", comment: ""), trailing: Text(NSLocalizedString("关闭", comment: "")).foregroundColor(CampusWalkUITheme.textMuted))
+                            SettingsItem(icon: "key", text: NSLocalizedString("账号密码", comment: ""))
+                        }
+                        Divider().padding(.vertical, 8).padding(.horizontal, 16)
+                        Group {
+                            SettingsItem(icon: "lock.shield", text: NSLocalizedString("隐私设置", comment: ""))
+                            SettingsItem(icon: "character.book.closed", text: NSLocalizedString("多语言", comment: ""), trailing: Text(locale.identifier == "zh_CN" ? "简体中文" : "English").foregroundColor(CampusWalkUITheme.textMuted))
+                            SettingsItem(icon: "waveform", text: NSLocalizedString("Siri 捷径设置", comment: ""))
+                            SettingsItem(icon: "eraser", text: NSLocalizedString("清理缓存", comment: ""), trailing: Text("3.50 MB").foregroundColor(CampusWalkUITheme.textMuted))
+                        }
+                        Divider().padding(.vertical, 8).padding(.horizontal, 16)
+                        Group {
+                            SettingsItem(icon: "person.text.rectangle", text: NSLocalizedString("个人信息查询", comment: ""))
+                            SettingsItem(icon: "person.2", text: NSLocalizedString("共享个人信息清单", comment: ""))
+                            SettingsItem(icon: "info.circle", text: NSLocalizedString("关于 CityWalk", comment: ""))
+                        }
+                        Divider().padding(.vertical, 8).padding(.horizontal, 16)
+                        Group {
+                            SettingsItem(icon: "lightbulb", text: NSLocalizedString("实验室", comment: ""))
+                            SettingsItem(icon: "antenna.radiowaves.left.and.right", text: NSLocalizedString("切换至国际服务器", comment: ""))
+                        }
+                    }
+                    .padding(.bottom, 32)
+                }
             }
-            .padding(.top, 60)
-            .padding(.bottom, 8)
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
             .background(Color.white)
-            Divider()
-            Group {
-                SettingsItem(icon: "person", text: NSLocalizedString("账号管理", comment: ""))
-                SettingsItem(icon: "lock", text: NSLocalizedString("安全设置", comment: ""), trailing: Text(NSLocalizedString("关闭", comment: "")).foregroundColor(.gray))
-                SettingsItem(icon: "key", text: NSLocalizedString("账号密码", comment: ""))
-            }
-            Divider().padding(.vertical, 2)
-            Group {
-                SettingsItem(icon: "lock.shield", text: NSLocalizedString("隐私设置", comment: ""))
-                SettingsItem(icon: "character.book.closed", text: NSLocalizedString("多语言", comment: ""), trailing: Text(locale.identifier == "zh_CN" ? "简体中文" : "English").foregroundColor(.gray))
-                SettingsItem(icon: "waveform", text: NSLocalizedString("Siri 捷径设置", comment: ""))
-                SettingsItem(icon: "eraser", text: NSLocalizedString("清理缓存", comment: ""), trailing: Text("3.50 MB").foregroundColor(.gray))
-            }
-            Divider().padding(.vertical, 2)
-            Group {
-                SettingsItem(icon: "person.text.rectangle", text: NSLocalizedString("个人信息查询", comment: ""))
-                SettingsItem(icon: "person.2", text: NSLocalizedString("共享个人信息清单", comment: ""))
-                SettingsItem(icon: "info.circle", text: NSLocalizedString("关于 CityWalk", comment: ""))
-            }
-            Divider().padding(.vertical, 2)
-            Group {
-                SettingsItem(icon: "lightbulb", text: NSLocalizedString("实验室", comment: ""))
-                SettingsItem(icon: "antenna.radiowaves.left.and.right", text: NSLocalizedString("切换至国际服务器", comment: ""))
-            }
-            Spacer()
         }
-        .background(Color.white)
+    }
+
+    private func topPadding(safeTop: CGFloat) -> CGFloat {
+        let base = safeTop > 1 ? safeTop : settingsDrawerTopFallbackWhenNoSafeArea
+        return base + settingsDrawerTopExtraBelowSafeArea
     }
 }
 
 struct SettingsItem: View {
     let icon: String
     let text: String
-    var trailing: AnyView? = nil
+    var trailing: AnyView?
+
     init(icon: String, text: String, trailing: AnyView? = nil) {
         self.icon = icon
         self.text = text
         self.trailing = trailing
     }
+
     init(icon: String, text: String, trailing: Text) {
         self.icon = icon
         self.text = text
         self.trailing = AnyView(trailing)
     }
+
     var body: some View {
         HStack(spacing: 16) {
             Image(systemName: icon)
-                .font(.system(size: 20, weight: .regular))
-                .foregroundColor(.gray)
+                .font(.system(size: 18, weight: .regular))
+                .foregroundStyle(CampusWalkUITheme.textMuted)
                 .frame(width: 28)
             Text(text)
                 .font(.system(size: 16))
-                .foregroundColor(.black)
+                .foregroundStyle(Color(red: 0.12, green: 0.13, blue: 0.15))
             Spacer()
-            if let trailing = trailing {
+            if let trailing {
                 trailing
             }
             Image(systemName: "chevron.right")
-                .foregroundColor(.gray.opacity(0.5))
-                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(CampusWalkUITheme.textMuted.opacity(0.6))
+                .font(.system(size: 14, weight: .medium))
         }
         .padding(.vertical, 14)
-        Divider().padding(.leading, 44)
-        .background(Color.white)
+        .padding(.horizontal, 16)
+        Divider()
+            .padding(.leading, 60)
     }
 }
 
-// 登录弹窗视图
-struct LoginView: View {
-    @ObservedObject var userViewModel: UserViewModel
-    @Binding var isPresented: Bool
-    @Binding var showRegister: Bool
-    @State private var username: String = ""
-    @State private var password: String = ""
-    @State private var showingAlert = false
-    
-    // 主体视图，渲染登录表单
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("用户名", text: $username)
-                    SecureField("密码", text: $password)
-                }
-                
-                Section {
-                    Button("登录") {
-                        // 登录逻辑，成功则关闭弹窗
-                        if userViewModel.login(username: username, password: password) {
-                            isPresented = false
-                        } else {
-                            showingAlert = true
-                        }
-                    }
-                    .disabled(username.isEmpty || password.isEmpty)
-                    
-                    Button("还没有账号？立即注册") {
-                        // 跳转到注册弹窗
-                        isPresented = false
-                        showRegister = true
-                    }
-                }
-            }
-            .navigationTitle("登录")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("取消") {
-                        isPresented = false
-                    }
-                }
-            }
-            .alert("登录失败", isPresented: $showingAlert) {
-                Button("确定", role: .cancel) { }
-            } message: {
-                Text("用户名或密码错误")
-            }
-        }
-    }
-}
-
-// 注册弹窗视图
-struct RegisterView: View {
-    @Binding var isPresented: Bool
-    @State private var username: String = ""
-    @State private var password: String = ""
-    @State private var confirmPassword: String = ""
-    @State private var showingAlert = false
-    @State private var alertMessage = ""
-    
-    // 主体视图，渲染注册表单
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("用户名", text: $username)
-                    SecureField("密码", text: $password)
-                    SecureField("确认密码", text: $confirmPassword)
-                }
-                
-                Section {
-                    Button("注册") {
-                        // TODO: 实现注册逻辑
-                        if password != confirmPassword {
-                            alertMessage = "两次输入的密码不一致"
-                            showingAlert = true
-                            return
-                        }
-                        // 处理注册成功的情况
-                        isPresented = false
-                    }
-                    .disabled(username.isEmpty || password.isEmpty || confirmPassword.isEmpty)
-                }
-            }
-            .navigationTitle("注册")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("取消") {
-                        isPresented = false
-                    }
-                }
-            }
-            .alert("注册失败", isPresented: $showingAlert) {
-                Button("确定", role: .cancel) { }
-            } message: {
-                Text(alertMessage)
-            }
-        }
-    }
-}
-
-// 历史记录视图
 struct HistoryView: View {
-    // 主体视图，渲染历史记录列表
     var body: some View {
         List {
-            ForEach(0..<10) { i in
+            ForEach(0..<10, id: \.self) { i in
                 VStack(alignment: .leading) {
                     Text("历史记录 \(i + 1)")
                         .font(.headline)
@@ -366,13 +345,11 @@ struct HistoryView: View {
     }
 }
 
-// 偏好设置视图
 struct PreferencesView: View {
     @State private var autoReply = false
     @State private var language = "简体中文"
     @State private var fontSize: Double = 16
-    
-    // 主体视图，渲染偏好设置表单
+
     var body: some View {
         Form {
             Section("基本设置") {
@@ -382,7 +359,7 @@ struct PreferencesView: View {
                     Text("English").tag("English")
                 }
             }
-            
+
             Section("显示") {
                 VStack {
                     Text("字体大小: \(Int(fontSize))")
@@ -394,12 +371,11 @@ struct PreferencesView: View {
     }
 }
 
-// 聊天设置视图
 struct ChatSettingsView: View {
     @State private var enableSound = true
     @State private var enableVibration = true
     @State private var messagePreview = true
-    
+
     var body: some View {
         Form {
             Section("通知") {
@@ -407,14 +383,12 @@ struct ChatSettingsView: View {
                 Toggle("振动", isOn: $enableVibration)
                 Toggle("消息预览", isOn: $messagePreview)
             }
-            
+
             Section("聊天记录") {
-                Button("清空聊天记录") {
-                    // TODO: 实现清空聊天记录功能
-                }
-                .foregroundColor(.red)
+                Button("清空聊天记录") {}
+                    .foregroundColor(.red)
             }
         }
         .navigationTitle("聊天设置")
     }
-} 
+}

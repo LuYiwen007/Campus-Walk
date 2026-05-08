@@ -5,57 +5,50 @@ struct MessageBubble: View {
     let message: Message
     let userAvatar: Image
     @ObservedObject var viewModel: MessageViewModel
-    let onOptionClick: (String) -> Void
-    
+    let onRouteSelected: (RouteVariantDTO) -> Void
+
     @Environment(\.fontSize) var fontSize
     @Environment(\.language) var language
-    
-    // 格式化时间显示，支持今天、昨天、周几、日期等多种格式
+
     private func formatTime(_ date: Date) -> String {
         let calendar = Calendar.current
         let now = Date()
         let components = calendar.dateComponents([.year, .month, .day, .weekday], from: date)
         let nowComponents = calendar.dateComponents([.year, .month, .day], from: now)
-        
+
         let timeFormatter = DateFormatter()
         timeFormatter.timeStyle = .short
         let timeString = timeFormatter.string(from: date)
-        
-        // 如果是今天
+
         if calendar.isDateInToday(date) {
             return timeString
         }
-        
-        // 如果是昨天
+
         if calendar.isDateInYesterday(date) {
             return (language == "简体中文" ? "昨天 " : "Yesterday ") + timeString
         }
-        
-        // 计算日期差
+
         let dayDiff = calendar.dateComponents([.day], from: date, to: now).day ?? 0
-        
-        // 如果在一周内
+
         if dayDiff < 7 {
             let weekdayFormatter = DateFormatter()
             weekdayFormatter.locale = Locale(identifier: language == "简体中文" ? "zh_CN" : "en_US")
             weekdayFormatter.dateFormat = "EEEE"
             return weekdayFormatter.string(from: date) + " " + timeString
         }
-        
-        // 其他情况显示年月
+
         let dateFormatter = DateFormatter()
         dateFormatter.locale = Locale(identifier: language == "简体中文" ? "zh_CN" : "en_US")
-        
-        // 如果是今年
+
         if components.year == nowComponents.year {
             dateFormatter.dateFormat = language == "简体中文" ? "M月d日" : "MMM d"
         } else {
             dateFormatter.dateFormat = language == "简体中文" ? "yyyy年M月d日" : "MMM d, yyyy"
         }
-        
+
         return dateFormatter.string(from: date) + " " + timeString
     }
-    
+
     @ViewBuilder
     private var bubbleContent: some View {
         if let data = message.imageData, let uiImage = UIImage(data: data) {
@@ -93,8 +86,7 @@ struct MessageBubble: View {
             }
         }
     }
-    
-    // 渲染单条消息气泡及时间
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             if message.isUser {
@@ -110,7 +102,7 @@ struct MessageBubble: View {
                     .frame(width: 40, height: 40)
                     .clipShape(Circle())
             } else {
-                Image(systemName: "sparkles") // AI助手头像
+                Image(systemName: "sparkles")
                     .font(.title)
                     .foregroundColor(.purple)
                     .frame(width: 40, height: 40)
@@ -125,27 +117,31 @@ struct MessageBubble: View {
                 Spacer()
             }
         }
-        
-        if !message.isUser, let options = message.options {
+
+        if !message.isUser, let variants = message.routeVariants, !variants.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                ForEach(options, id: \.self) { option in
-                    Button(action: {
-                        onOptionClick(option)
-                    }) {
-                        Text(option)
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .padding()
-                            .frame(maxWidth: .infinity)
-                            .background(Color.blue.opacity(0.1))
-                            .foregroundColor(.blue)
-                            .clipShape(Capsule())
+                ForEach(variants, id: \.self) { v in
+                    Button {
+                        onRouteSelected(v)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(v.displayLabel)
+                                .font(.subheadline.weight(.bold))
+                            Text("\(v.startLabel) → \(v.endLabel) · 约 \(v.estimatedDurationSeconds / 60) 分钟 · \(v.estimatedDistanceMeters) m")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                        .background(Color.blue.opacity(0.1))
+                        .foregroundColor(.blue)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
                 }
             }
             .padding(.top, 8)
-            .padding(.leading, 40 + 12) // 头像宽度加间距
+            .padding(.leading, 40 + 12)
             .padding(.trailing, 12)
         }
     }
-} 
+}

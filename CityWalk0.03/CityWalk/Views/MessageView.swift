@@ -5,7 +5,8 @@ import MapKit
 struct MessageView: View {
     @EnvironmentObject var viewModel: MessageViewModel // 聊天数据模型
     @StateObject private var settings = SettingsManager.shared // 设置管理器
-    @StateObject private var userViewModel = UserViewModel()
+    /// 用户侧气泡头像（登录态由后端账号区分，此处统一用系统图标）
+    private var userBubbleAvatar: Image { Image(systemName: "person.crop.circle.fill") }
     @State private var mapHeight: CGFloat = 0 // 地图高度
     @State private var isChatMinimized = false // 聊天页面是否收缩为小圆圈
     @State private var showChat = true // 是否显示聊天页面
@@ -41,10 +42,22 @@ struct MessageView: View {
         ZStack(alignment: .bottomTrailing) {
             // 用户资料抽屉
             if showProfileDrawer {
-                UserProfileView(isShowingProfile: $showProfileDrawer)
-                    .ignoresSafeArea()
-                    .transition(.move(edge: .leading))
-                    .zIndex(2)
+                HStack(spacing: 0) {
+                    UserProfileView(isShowingProfile: $showProfileDrawer)
+                        .frame(width: UIScreen.main.bounds.width * 0.85, alignment: .leading)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .background(Color.white)
+                        .ignoresSafeArea(edges: .top)
+                        .transition(.move(edge: .leading))
+                    Spacer(minLength: 0)
+                }
+                .background(
+                    Color.black.opacity(0.2)
+                        .contentShape(Rectangle())
+                        .onTapGesture { withAnimation { showProfileDrawer = false } }
+                )
+                .ignoresSafeArea()
+                .zIndex(2)
             }
             
             // 地图始终在底层
@@ -135,9 +148,9 @@ struct MessageView: View {
                 ScrollView {
                     LazyVStack(spacing: 12) {
                         ForEach(viewModel.messages) { message in
-                            MessageBubble(message: message, userAvatar: userViewModel.userAvatar, viewModel: viewModel) { option in
+                            MessageBubble(message: message, userAvatar: userBubbleAvatar, viewModel: viewModel) { variant in
                                 withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-                                    self.routeToShow = option
+                                    self.routeToShow = "\(variant.displayLabel)：\(variant.startLabel)→\(variant.endLabel)\n\(variant.description)"
                                     isChatMinimized = true
                                     showChat = false
                                 }
@@ -145,26 +158,6 @@ struct MessageView: View {
                             .id(message.id)
                             .environment(\.fontSize, settings.fontSize)
                             .environment(\.language, settings.language)
-                            // 如果是推荐线路消息，展示确认按钮
-                            if message.isRouteRecommendation {
-                                Button(action: {
-                                    // 点击确认后收缩聊天页面并显示地图
-                                    withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-                                        isChatMinimized = true
-                                        showChat = false
-                                    }
-                                }) {
-                                    Text("确认")
-                                        .font(.system(size: 15, weight: .bold))
-                                        .padding(.horizontal, 18)
-                                        .padding(.vertical, 8)
-                                        .background(Color.blue)
-                                        .foregroundColor(.white)
-                                        .clipShape(Capsule())
-                                        .shadow(radius: 2)
-                                }
-                                .padding(.bottom, 8)
-                            }
                         }
                     }
                     .padding()
@@ -188,7 +181,7 @@ struct MessageView: View {
                     }
                     // 监听流式输出时的自动滚动
                     NotificationCenter.default.addObserver(forName: NSNotification.Name("StreamScrollToBottom"), object: nil, queue: .main) { notification in
-                        if let id = notification.object as? UUID {
+                        if let id = notification.object as? String {
                             withAnimation {
                                 proxy.scrollTo(id, anchor: .bottom)
                             }
@@ -288,7 +281,11 @@ struct MessageView: View {
                         }
                     }
                     .sheet(isPresented: $viewModel.showSegmentedRoute) {
-                        SegmentedRouteView(conversationId: viewModel.currentConversationId)
+                        if let cid = viewModel.conversationId {
+                            SegmentedRouteView(conversationId: cid)
+                        } else {
+                            Text("暂无会话")
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -325,7 +322,6 @@ struct MessageView: View {
             }
         }
         .onAppear {
-            // 监听聊天记录清除通知，收到后清空消息
             NotificationCenter.default.addObserver(
                 forName: NSNotification.Name("ChatHistoryCleared"),
                 object: nil,
@@ -333,7 +329,9 @@ struct MessageView: View {
             ) { _ in
                 viewModel.messages.removeAll()
             }
-            // 聊天页面出现时自动滚动到底部
+            Task {
+                await viewModel.bootstrapConversation()
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 if let lastMessage = viewModel.messages.last {
                     NotificationCenter.default.post(name: NSNotification.Name("ScrollToBottom"), object: lastMessage.id)

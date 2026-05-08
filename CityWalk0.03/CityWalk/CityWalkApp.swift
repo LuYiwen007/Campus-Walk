@@ -50,10 +50,22 @@ struct CityWalkApp: App {
 
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
+    @StateObject private var auth = AuthViewModel()
+
     // 主体视图，渲染主窗口和注入数据容器
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            Group {
+                if auth.isLoggedIn {
+                    ContentView()
+                } else {
+                    LoginView()
+                }
+            }
+            .environmentObject(auth)
+            .task {
+                await auth.restoreSession()
+            }
         }
         .modelContainer(sharedModelContainer)
     }
