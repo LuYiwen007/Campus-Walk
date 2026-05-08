@@ -11,7 +11,7 @@ struct MainTabView: View {
     @Binding var selectedTab: Int // 当前选中的Tab索引
     @StateObject private var sharedMapState = SharedMapState() // 地图状态共享对象
     @StateObject private var messageViewModel = MessageViewModel() // 全局聊天数据模型
-    private let tabBarHeight: CGFloat = 68 // 增加底部Tab栏高度
+    private let tabBarHeight: CGFloat = 64
     
     // 主体视图，渲染Tab内容和底部导航栏
     var body: some View {
@@ -46,20 +46,21 @@ struct MainTabView: View {
                 TabBarButton(title: "新的旅程", systemImage: "bubble.left.and.bubble.right", selected: selectedTab == 1) {
                     withAnimation(.easeInOut(duration: 0.2)) { selectedTab = 1 }
                 }
-                    Spacer()
-                TabBarButton(title: "我的", systemImage: "suitcase", selected: selectedTab == 2) {
+                Spacer()
+                TabBarButton(title: "我的", systemImage: "briefcase", selected: selectedTab == 2) {
                     withAnimation(.easeInOut(duration: 0.2)) { selectedTab = 2 }
                 }
             }
-            .padding(.horizontal, 30)
-            .padding(.top, 12)
-            .frame(height: tabBarHeight)
-            .background(
-                Color(.systemBackground)
-                    .clipShape(RoundedCorner(radius: 20, corners: [.topLeft, .topRight]))
-                    .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: -4)
-                    .ignoresSafeArea(.all, edges: .bottom)
-            )
+            .padding(.horizontal, 16)
+            .frame(height: 64)
+            .background(.bar)
+            .background(Color.white.opacity(0.82))
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(CampusWalkUITheme.borderSubtle)
+                    .frame(height: 1)
+            }
+            .ignoresSafeArea(.all, edges: .bottom)
         }
     }
 }
@@ -73,15 +74,14 @@ struct TabBarButton: View {
     // 渲染单个Tab按钮
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 5) {
+            VStack(spacing: 4) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 24, weight: .regular))
+                    .font(.system(size: 20, weight: .regular))
                     .symbolVariant(selected ? .fill : .none)
-                    .scaleEffect(selected ? 1.05 : 1.0)
-                    .foregroundColor(selected ? .blue : .gray.opacity(0.8))
+                    .foregroundStyle(selected ? CampusWalkUITheme.brandBlue : CampusWalkUITheme.textMuted)
                 Text(title)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(selected ? .blue : .gray.opacity(0.8))
+                    .foregroundStyle(selected ? CampusWalkUITheme.brandBlue : CampusWalkUITheme.textMuted)
             }
             .frame(maxWidth: .infinity)
         }

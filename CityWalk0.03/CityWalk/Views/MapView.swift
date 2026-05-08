@@ -34,27 +34,8 @@ struct MapView: View {
                 )
                     .id(mapViewId)
                     .frame(width: geometry.size.width, height: geometry.size.height)
-                // 导航模式切换按钮
-                VStack {
-                    HStack {
-                        Spacer()
-                        Button(action: {
-                            isNavigationMode.toggle()
-                        }) {
-                            Image(systemName: isNavigationMode ? "location.fill" : "location")
-                                .font(.system(size: 20))
-                                .foregroundColor(.white)
-                                .frame(width: 44, height: 44)
-                                .background(isNavigationMode ? Color.blue : Color.gray.opacity(0.7))
-                                .clipShape(Circle())
-                        }
-                        .padding(.trailing, 16)
-                        .padding(.top, 16)
-                    }
-                    Spacer()
-                }
-                
-                // 右上角自定义定位按钮和底部分界线等UI保留
+
+                // 底部分隔线（不参与点击）
                 Rectangle()
                     .frame(height: 1)
                     .foregroundColor(Color(.systemGray4))

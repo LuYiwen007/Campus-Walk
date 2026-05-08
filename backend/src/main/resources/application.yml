@@ -1,0 +1,38 @@
+# 若启动后立即退出：请看控制台是否出现 Access denied / using password: NO —— 表示未配置数据库密码。
+# 任选其一：① 环境变量 MYSQL_PASSWORD 或 SPRING_DATASOURCE_PASSWORD ② 在「运行工作目录」下放置 application-local.yml（见仓库内 application-local.example.yml）
+server:
+  port: ${API_PORT:8081}
+
+spring:
+  application:
+    name: campus-walk-api
+  config:
+    # 工作目录为 backend 时用 ./ ；在仓库根目录运行时用 ./backend/
+    import: optional:file:./application-local.yml,optional:file:./backend/application-local.yml
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:campus_walk}?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:${SPRING_DATASOURCE_PASSWORD:}}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+    serialization:
+      write-dates-as-timestamps: false
+
+app:
+  jwt-secret: ${JWT_SECRET:dev-change-on-server}
+  jwt-algorithm: HS256
+  jwt-expire-minutes: ${JWT_EXPIRE_MINUTES:10080}
+  cors-origins: ${CORS_ORIGINS:http://localhost:3000,http://127.0.0.1:3000,http://localhost:8081,http://127.0.0.1:8081}
+  seed-on-startup: ${SEED_ON_STARTUP:true}
+  message-retention-days: ${MESSAGE_RETENTION_DAYS:10}
+  use-mock-llm: ${USE_MOCK_LLM:true}
+  dashscope-api-key: ${DASHSCOPE_API_KEY:}
