@@ -11,13 +11,21 @@ extension CLLocationCoordinate2D: Equatable {
     }
 }
 
+/// 分段步行路线 overlay，便于按段设置不同描边色
+final class LegIndexedPolyline: MAPolyline {
+    var legIndex: Int = 0
+}
+
 struct AMapViewRepresentable: UIViewRepresentable {
     // 基本属性
     let startCoordinate: CLLocationCoordinate2D?
     let destination: CLLocationCoordinate2D?
     var centerCoordinate: CLLocationCoordinate2D? = nil
     var showSearchBar: Bool = true
-    
+    /// 聊天确认后的地名链（起点、途经点…、终点），将依次 POI 检索并分段请求高德步行路径
+    var pendingWalkLegPlaceNames: [String]? = nil
+    var onConsumePendingWalkLeg: (() -> Void)? = nil
+
     // 导航相关
     @StateObject private var walkNavManager = SimpleNavigationManager.shared
     var onNavigationStart: (() -> Void)? = nil
@@ -180,9 +188,8 @@ struct AMapViewRepresentable: UIViewRepresentable {
             mapView.userTrackingMode = .follow
         }
 
-        // 如果正在导航，不要清除覆盖层（路线已经在 onRouteSearchDone 中绘制）
-        if !context.coordinator.isNavigating {
-            // 清除现有覆盖层
+        // 如果正在导航或多段路线规划中，不要清除覆盖层
+        if !context.coordinator.isNavigating && !context.coordinator.isMultiLegRouting {
             mapView.removeOverlays(mapView.overlays)
         }
         
@@ -199,15 +206,20 @@ struct AMapViewRepresentable: UIViewRepresentable {
             }
         }
         
-        // 自动规划路线（仅在非导航状态下，且起终点改变时）
+        // 自动规划路线（仅在非导航、非多段规划状态下，且起终点改变时）
         if !context.coordinator.isNavigating,
-           let start = startCoordinate, 
+           !context.coordinator.isMultiLegRouting,
+           let start = startCoordinate,
            let dest = destination {
             if context.coordinator.lastRouteStart != start || context.coordinator.lastRouteDest != dest {
                 context.coordinator.lastRouteStart = start
                 context.coordinator.lastRouteDest = dest
                 context.coordinator.searchWalkingRoute(from: start, to: dest, on: mapView)
             }
+        }
+
+        if let names = pendingWalkLegPlaceNames, names.count >= 2, !context.coordinator.isMultiLegRouting {
+            context.coordinator.beginMultiLegWalking(names: names, mapView: mapView)
         }
     }
 
@@ -358,7 +370,14 @@ struct AMapViewRepresentable: UIViewRepresentable {
         var navigationDestination: CLLocationCoordinate2D? // 保存导航目的地，用于重新规划
         var lastReplanTime: Date? // 上次重新规划的时间，用于防止频繁重新规划
         var isOffRoute: Bool = false // 是否偏离路线
-        
+
+        // MARK: - 聊天确认后的多段步行（POI 检索 + 分段高德步行路径）
+        var isMultiLegRouting: Bool = false
+        private var multiLegGeocodeNames: [String]?
+        private var multiLegGeocodeCoords: [CLLocationCoordinate2D] = []
+        private var multiLegResolvedCoords: [CLLocationCoordinate2D]?
+        private var multiLegWalkingSegmentIndex: Int = 0
+
         init(_ parent: AMapViewRepresentable) {
             self.parent = parent
             super.init()
@@ -401,15 +420,156 @@ struct AMapViewRepresentable: UIViewRepresentable {
         // 搜索功能
         func didTapSearch(with keyword: String) {
             guard !keyword.isEmpty else { return }
+            cancelMultiLegRouting(reason: "用户发起关键词搜索")
             let request = AMapPOIKeywordsSearchRequest()
             request.keywords = keyword
             request.city = nil
             search?.aMapPOIKeywordsSearch(request)
         }
+
+        private func cancelMultiLegRouting(reason: String) {
+            if isMultiLegRouting || multiLegGeocodeNames != nil {
+                print("ℹ️ [多段路线] 取消：\(reason)")
+            }
+            multiLegGeocodeNames = nil
+            multiLegGeocodeCoords = []
+            multiLegResolvedCoords = nil
+            isMultiLegRouting = false
+        }
+
+        func beginMultiLegWalking(names: [String], mapView: MAMapView) {
+            print("[多段路线] 开始解析地名链：\(names.joined(separator: " → "))")
+            lastRouteStart = nil
+            lastRouteDest = nil
+            isMultiLegRouting = true
+            multiLegResolvedCoords = nil
+            multiLegWalkingSegmentIndex = 0
+            multiLegGeocodeNames = names
+            multiLegGeocodeCoords = []
+            mapView.removeOverlays(mapView.overlays)
+            requestMultiLegPoi(keyword: names[0])
+        }
+
+        private func requestMultiLegPoi(keyword: String) {
+            let request = AMapPOIKeywordsSearchRequest()
+            request.keywords = keyword
+            request.city = nil
+            search?.aMapPOIKeywordsSearch(request)
+        }
+
+        private func failMultiLeg(_ reason: String) {
+            print("❌ [多段路线] \(reason)")
+            endMultiLegAndNotifyParent()
+        }
+
+        private func endMultiLegAndNotifyParent() {
+            multiLegGeocodeNames = nil
+            multiLegGeocodeCoords = []
+            multiLegResolvedCoords = nil
+            isMultiLegRouting = false
+            DispatchQueue.main.async {
+                self.parent.onConsumePendingWalkLeg?()
+            }
+        }
+
+        private func finishMultiLegSuccess(mapView: MAMapView) {
+            let coords = multiLegResolvedCoords ?? []
+            guard coords.count >= 2 else {
+                failMultiLeg("坐标链无效")
+                return
+            }
+            let minLat = coords.map(\.latitude).min() ?? 0
+            let maxLat = coords.map(\.latitude).max() ?? 0
+            let minLon = coords.map(\.longitude).min() ?? 0
+            let maxLon = coords.map(\.longitude).max() ?? 0
+            let centerLat = (minLat + maxLat) / 2
+            let centerLon = (minLon + maxLon) / 2
+            let spanLat = max(maxLat - minLat, 0.004) * 1.35
+            let spanLon = max(maxLon - minLon, 0.004) * 1.35
+            let region = MACoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: centerLat, longitude: centerLon),
+                span: MACoordinateSpan(latitudeDelta: spanLat, longitudeDelta: spanLon)
+            )
+            mapView.setRegion(region, animated: true)
+            endMultiLegAndNotifyParent()
+        }
+
+        /// 步行规划回调中的多段分支；返回 true 表示已消费该回调
+        private func handleMultiLegOnRouteSearchDone(path: AMapPath, mapView: MAMapView!) -> Bool {
+            guard isMultiLegRouting,
+                  let chain = multiLegResolvedCoords,
+                  chain.count >= 2,
+                  multiLegWalkingSegmentIndex < chain.count - 1,
+                  let steps = path.steps as? [AMapStep],
+                  !steps.isEmpty
+            else { return false }
+
+            var coordinates: [CLLocationCoordinate2D] = []
+            for step in steps {
+                guard let polylineStr = step.polyline else { continue }
+                let points = polylineStr.split(separator: ";").compactMap { pair -> CLLocationCoordinate2D? in
+                    let comps = pair.split(separator: ",")
+                    if comps.count == 2, let lon = Double(comps[0]), let lat = Double(comps[1]) {
+                        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+                    }
+                    return nil
+                }
+                coordinates.append(contentsOf: points)
+            }
+            guard coordinates.count > 1 else {
+                failMultiLeg("某段路线坐标不足")
+                return true
+            }
+            let legIdx = multiLegWalkingSegmentIndex
+            var coordsMut = coordinates
+            guard let poly = LegIndexedPolyline(coordinates: &coordsMut, count: UInt(coordsMut.count)) else {
+                failMultiLeg("无法创建路线折线")
+                return true
+            }
+            poly.legIndex = legIdx
+            mapView.add(poly)
+            multiLegWalkingSegmentIndex += 1
+            if multiLegWalkingSegmentIndex < chain.count - 1 {
+                let from = chain[multiLegWalkingSegmentIndex]
+                let to = chain[multiLegWalkingSegmentIndex + 1]
+                searchWalkingRoute(from: from, to: to, on: mapView)
+            } else {
+                finishMultiLegSuccess(mapView: mapView)
+            }
+            return true
+        }
         
         // POI搜索回调
         func onPOISearchDone(_ request: AMapPOISearchBaseRequest!, response: AMapPOISearchResponse!) {
             guard let mapView = mapView else { return }
+
+            if let names = multiLegGeocodeNames {
+                guard let poi = response.pois.first else {
+                    failMultiLeg("地点「\(names[multiLegGeocodeCoords.count])」检索无结果")
+                    return
+                }
+                let dest = CLLocationCoordinate2D(
+                    latitude: CLLocationDegrees(poi.location.latitude),
+                    longitude: CLLocationDegrees(poi.location.longitude)
+                )
+                multiLegGeocodeCoords.append(dest)
+                if multiLegGeocodeCoords.count < names.count {
+                    let nextKeyword = names[multiLegGeocodeCoords.count]
+                    requestMultiLegPoi(keyword: nextKeyword)
+                } else {
+                    multiLegGeocodeNames = nil
+                    multiLegResolvedCoords = multiLegGeocodeCoords
+                    multiLegGeocodeCoords = []
+                    multiLegWalkingSegmentIndex = 0
+                    guard let chain = multiLegResolvedCoords, chain.count >= 2 else {
+                        failMultiLeg("解析后坐标不足两段")
+                        return
+                    }
+                    searchWalkingRoute(from: chain[0], to: chain[1], on: mapView)
+                }
+                return
+            }
+
             guard let poi = response.pois.first else {
                 print("[地图] POI 搜索无结果")
                 return
@@ -488,6 +648,10 @@ struct AMapViewRepresentable: UIViewRepresentable {
             guard !response.route.paths.isEmpty,
                   let path = response.route.paths.first else {
                 print("❌ [路线规划] 路线数据为空")
+                if self.isMultiLegRouting {
+                    self.failMultiLeg("未找到可用步行路线")
+                    return
+                }
                 DispatchQueue.main.async {
                     if self.isNavigating {
                         self.instructionLabel?.text = "未找到可用路线，请重试"
@@ -507,11 +671,19 @@ struct AMapViewRepresentable: UIViewRepresentable {
             
             guard let steps = path.steps, !steps.isEmpty else {
                 print("❌ [路线规划] 路线步骤为空")
+                if self.isMultiLegRouting {
+                    self.failMultiLeg("某段路线无可用步行步骤")
+                    return
+                }
                 DispatchQueue.main.async {
                     if self.isNavigating {
                         self.instructionLabel?.text = "路线数据不完整"
                     }
                 }
+                return
+            }
+
+            if handleMultiLegOnRouteSearchDone(path: path, mapView: mapView) {
                 return
             }
             
@@ -1406,6 +1578,14 @@ struct AMapViewRepresentable: UIViewRepresentable {
         
         // 地图代理方法
         func mapView(_ mapView: MAMapView!, rendererFor overlay: MAOverlay!) -> MAOverlayRenderer! {
+            if let legLine = overlay as? LegIndexedPolyline {
+                let renderer = MAPolylineRenderer(polyline: legLine)
+                let colors: [UIColor] = [.systemBlue, .systemOrange, .systemGreen]
+                let c = colors[legLine.legIndex % colors.count]
+                renderer?.strokeColor = c.withAlphaComponent(0.9)
+                renderer?.lineWidth = 7.0
+                return renderer
+            }
             if let polyline = overlay as? MAPolyline {
                 let renderer = MAPolylineRenderer(polyline: polyline)
                 renderer?.strokeColor = UIColor.systemBlue
@@ -1430,7 +1610,11 @@ struct AMapViewRepresentable: UIViewRepresentable {
         
         func aMapSearchRequest(_ request: Any!, didFailWithError error: Error!) {
             print("❌ [路线规划] 搜索请求失败：\(error.localizedDescription)")
-            
+            if isMultiLegRouting || multiLegGeocodeNames != nil {
+                failMultiLeg("高德请求失败：\(error.localizedDescription)")
+                return
+            }
+
             // 显示错误信息给用户
             DispatchQueue.main.async {
                 if self.isNavigating {

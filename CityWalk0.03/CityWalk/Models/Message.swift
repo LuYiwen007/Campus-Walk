@@ -10,6 +10,8 @@ struct Message: Identifiable, Equatable {
     /// 路线一、二、三（来自后端 route_batch）
     var routeVariants: [RouteVariantDTO]? = nil
     var imageData: Data?
+    /// 后端标记该条用户消息是否带图（模型已按图规划）
+    var hasImageFromServer: Bool = false
 
     var isRouteRecommendation: Bool {
         routeVariants != nil && !(routeVariants?.isEmpty ?? true)
@@ -22,7 +24,8 @@ struct Message: Identifiable, Equatable {
         timestamp: Date,
         messageType: String? = nil,
         routeVariants: [RouteVariantDTO]? = nil,
-        imageData: Data? = nil
+        imageData: Data? = nil,
+        hasImageFromServer: Bool = false
     ) {
         self.id = id
         self.content = content
@@ -31,6 +34,7 @@ struct Message: Identifiable, Equatable {
         self.messageType = messageType
         self.routeVariants = routeVariants
         self.imageData = imageData
+        self.hasImageFromServer = hasImageFromServer
     }
 
     private static func parseApiDate(_ s: String) -> Date {
@@ -47,8 +51,9 @@ struct Message: Identifiable, Equatable {
         isUser = dto.role == "user"
         timestamp = Self.parseApiDate(dto.sentAt)
         messageType = dto.messageType
-        routeVariants = nil
+        routeVariants = dto.routeBatch?.variants
         imageData = nil
+        hasImageFromServer = dto.hasImage ?? false
     }
 
     init(dto: ChatMessageDTO, routeVariants: [RouteVariantDTO]?) {
@@ -59,5 +64,6 @@ struct Message: Identifiable, Equatable {
         messageType = dto.messageType
         self.routeVariants = routeVariants
         imageData = nil
+        hasImageFromServer = dto.hasImage ?? false
     }
 }

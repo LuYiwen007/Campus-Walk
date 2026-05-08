@@ -21,8 +21,18 @@ struct MessageView: View {
     // 新增：输入框焦点状态
     @FocusState private var isInputFocused: Bool
     
-    // 新增：地图状态共享对象
-    var sharedMapState: SharedMapState? = nil
+    // 与 Tab 地图共享：确认路线后写入待规划地名链
+    @ObservedObject var sharedMapState: SharedMapState
+
+    private static func walkPlaceNameChain(from variant: RouteVariantDTO) -> [String] {
+        let mid = Array(variant.scenicSpotExamples.prefix(3))
+        let raw = [variant.startLabel] + mid + [variant.endLabel]
+        return raw.reduce(into: [String]()) { acc, s in
+            let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !t.isEmpty else { return }
+            if acc.last != t { acc.append(t) }
+        }
+    }
     
     // 地图高度的常量
     private let minMapHeight: CGFloat = UIScreen.main.bounds.height * 0.5
@@ -62,32 +72,19 @@ struct MessageView: View {
             
             // 地图始终在底层
             if !showChat {
-                if let sharedMapState = sharedMapState {
-                    MapView(
-                        isExpanded: .constant(true),
-                        isShowingProfile: .constant(false),
-                        sharedMapState: sharedMapState,
-                        routeInfo: routeToShow,
-                        destinationLocation: $destinationLocation,
-                        selectedPlaceIndex: $selectedPlaceIndex,
-                        startCoordinateBinding: $startCoordinate,
-                        isNavigationMode: $isNavigationMode
-                    )
-                    .ignoresSafeArea()
-                    .transition(.opacity)
-                } else {
-                    MapView(
-                        isExpanded: .constant(true),
-                        isShowingProfile: .constant(false),
-                        routeInfo: routeToShow,
-                        destinationLocation: $destinationLocation,
-                        selectedPlaceIndex: $selectedPlaceIndex,
-                        startCoordinateBinding: $startCoordinate,
-                        isNavigationMode: $isNavigationMode
-                    )
-                    .ignoresSafeArea()
-                    .transition(.opacity)
-                }
+                MapView(
+                    isExpanded: .constant(true),
+                    isShowingProfile: .constant(false),
+                    routeInfo: routeToShow,
+                    destinationLocation: $destinationLocation,
+                    selectedPlaceIndex: $selectedPlaceIndex,
+                    startCoordinateBinding: $startCoordinate,
+                    isNavigationMode: $isNavigationMode,
+                    pendingWalkLegPlaceNames: sharedMapState.pendingWalkLegPlaceNames,
+                    onConsumePendingWalkLeg: { sharedMapState.pendingWalkLegPlaceNames = nil }
+                )
+                .ignoresSafeArea()
+                .transition(.opacity)
                 
                 // 右下角聊天按钮
                 HStack {
@@ -149,8 +146,11 @@ struct MessageView: View {
                     LazyVStack(spacing: 12) {
                         ForEach(viewModel.messages) { message in
                             MessageBubble(message: message, userAvatar: userBubbleAvatar, viewModel: viewModel) { variant in
+                                let chain = Self.walkPlaceNameChain(from: variant)
+                                sharedMapState.pendingWalkLegPlaceNames = chain
                                 withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-                                    self.routeToShow = "\(variant.displayLabel)：\(variant.startLabel)→\(variant.endLabel)\n\(variant.description)"
+                                    let samples = Array(variant.scenicSpotExamples.prefix(3)).joined(separator: "、")
+                                    self.routeToShow = "\(variant.displayLabel)：\(variant.startLabel) → \(variant.endLabel)\(samples.isEmpty ? "" : "（途经：\(samples)）")\n\(variant.description)"
                                     isChatMinimized = true
                                     showChat = false
                                 }
@@ -278,13 +278,6 @@ struct MessageView: View {
                             if let image = image, let data = image.jpegData(compressionQuality: 0.8) {
                                 viewModel.sendImageMessage(data: data)
                             }
-                        }
-                    }
-                    .sheet(isPresented: $viewModel.showSegmentedRoute) {
-                        if let cid = viewModel.conversationId {
-                            SegmentedRouteView(conversationId: cid)
-                        } else {
-                            Text("暂无会话")
                         }
                     }
                 }
