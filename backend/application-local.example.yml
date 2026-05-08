@@ -1,0 +1,6 @@
+# 使用方式：复制为与 pom.xml 同目录下的 application-local.yml，填入密码后从 IDE 运行（工作目录须为 backend 模块根目录）。
+# 也可不设此文件，改为在运行配置里设置环境变量 MYSQL_PASSWORD（与 PythonProject/.env 中数据库密码一致）。
+
+spring:
+  datasource:
+    password: "你的MySQL密码"

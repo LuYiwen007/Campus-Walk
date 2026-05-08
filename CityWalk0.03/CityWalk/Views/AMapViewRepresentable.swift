@@ -34,7 +34,9 @@ struct AMapViewRepresentable: UIViewRepresentable {
         
         // 基本地图设置
         mapView.showsUserLocation = true
-        mapView.userTrackingMode = .followWithHeading // 启用朝向指示器
+        mapView.showsCompass = false // 不显示右上角「北」指南针
+        mapView.showsScale = false // 不显示左下角半透明比例尺
+        mapView.userTrackingMode = .follow // 仅跟随位置，不跟朝向（避免出现半透明朝向扇形）
         mapView.delegate = context.coordinator
         mapView.zoomLevel = 16
         mapView.isShowTraffic = false
@@ -102,26 +104,12 @@ struct AMapViewRepresentable: UIViewRepresentable {
             ])
         }
         
-        // 定位按钮
-        let locateBtn = UIButton(type: .custom)
-        locateBtn.setImage(UIImage(systemName: "location.fill"), for: .normal)
-        locateBtn.backgroundColor = .white
-        locateBtn.layer.cornerRadius = 24
-        locateBtn.layer.shadowColor = UIColor.black.cgColor
-        locateBtn.layer.shadowOpacity = 0.12
-        locateBtn.layer.shadowOffset = CGSize(width: 0, height: 2)
-        locateBtn.layer.shadowRadius = 6
-        locateBtn.translatesAutoresizingMaskIntoConstraints = false
-        locateBtn.addTarget(context.coordinator, action: #selector(Coordinator.locateUser), for: .touchUpInside)
-        container.addSubview(locateBtn)
-        NSLayoutConstraint.activate([
-            locateBtn.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -18),
-            locateBtn.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -90),
-            locateBtn.widthAnchor.constraint(equalToConstant: 48),
-            locateBtn.heightAnchor.constraint(equalToConstant: 48)
-        ])
-        
-        // AR按钮
+        // 与 MessageView 右下角聊天按钮对齐：50×50、底边距 30、右侧 17
+        let mapFloatingChatSize: CGFloat = 50
+        let mapFloatingChatBottomInset: CGFloat = 30
+        let mapFloatingStackGap: CGFloat = 12
+
+        // AR 按钮（最上）
         let arBtn = UIButton(type: .custom)
         arBtn.setTitle("AR", for: .normal)
         arBtn.titleLabel?.font = UIFont.boldSystemFont(ofSize: 16)
@@ -136,11 +124,34 @@ struct AMapViewRepresentable: UIViewRepresentable {
         arBtn.addTarget(context.coordinator, action: #selector(Coordinator.openARDirect), for: .touchUpInside)
         container.addSubview(arBtn)
         context.coordinator.arButton = arBtn
+
+        // 定位按钮（中间，与聊天按钮同大 50×50）
+        let locateBtn = UIButton(type: .custom)
+        locateBtn.setImage(UIImage(systemName: "location.fill"), for: .normal)
+        locateBtn.tintColor = .systemBlue
+        locateBtn.backgroundColor = .white
+        locateBtn.layer.cornerRadius = mapFloatingChatSize / 2
+        locateBtn.layer.shadowColor = UIColor.black.cgColor
+        locateBtn.layer.shadowOpacity = 0.12
+        locateBtn.layer.shadowOffset = CGSize(width: 0, height: 2)
+        locateBtn.layer.shadowRadius = 6
+        locateBtn.translatesAutoresizingMaskIntoConstraints = false
+        locateBtn.addTarget(context.coordinator, action: #selector(Coordinator.locateUser), for: .touchUpInside)
+        container.addSubview(locateBtn)
+
         NSLayoutConstraint.activate([
-            arBtn.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -18),
-            arBtn.bottomAnchor.constraint(equalTo: locateBtn.topAnchor, constant: -12),
+            arBtn.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -17),
             arBtn.widthAnchor.constraint(equalToConstant: 48),
-            arBtn.heightAnchor.constraint(equalToConstant: 36)
+            arBtn.heightAnchor.constraint(equalToConstant: 36),
+            arBtn.bottomAnchor.constraint(equalTo: locateBtn.topAnchor, constant: -mapFloatingStackGap),
+
+            locateBtn.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -17),
+            locateBtn.widthAnchor.constraint(equalToConstant: mapFloatingChatSize),
+            locateBtn.heightAnchor.constraint(equalToConstant: mapFloatingChatSize),
+            locateBtn.bottomAnchor.constraint(
+                equalTo: container.bottomAnchor,
+                constant: -(mapFloatingChatBottomInset + mapFloatingChatSize + mapFloatingStackGap)
+            )
         ])
         
         // 信息卡片
@@ -162,12 +173,13 @@ struct AMapViewRepresentable: UIViewRepresentable {
     
     func updateUIView(_ uiView: UIView, context: Context) {
         guard let mapView = context.coordinator.mapView else { return }
-        
-        // 确保朝向指示器始终启用（除非用户手动改变）
-        if mapView.userTrackingMode != .followWithHeading {
-            mapView.userTrackingMode = .followWithHeading
+
+        mapView.showsCompass = false
+        mapView.showsScale = false
+        if mapView.userTrackingMode != .follow {
+            mapView.userTrackingMode = .follow
         }
-        
+
         // 如果正在导航，不要清除覆盖层（路线已经在 onRouteSearchDone 中绘制）
         if !context.coordinator.isNavigating {
             // 清除现有覆盖层
@@ -177,15 +189,13 @@ struct AMapViewRepresentable: UIViewRepresentable {
         // 设置中心点
         if let start = startCoordinate {
             mapView.setCenter(start, animated: false)
-            // 设置中心点后，重新启用朝向指示器
-            mapView.userTrackingMode = .followWithHeading
+            mapView.userTrackingMode = .follow
         }
-        
+
         if let center = centerCoordinate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 mapView.setCenter(center, animated: true)
-                // 设置中心点后，重新启用朝向指示器
-                mapView.userTrackingMode = .followWithHeading
+                mapView.userTrackingMode = .follow
             }
         }
         
@@ -200,7 +210,7 @@ struct AMapViewRepresentable: UIViewRepresentable {
             }
         }
     }
-    
+
     // MARK: - 导航UI - 按照高德官方样式
     private func addNavigationUI(to container: UIView, coordinator: Coordinator) {
         // 顶部导航信息栏 - 深色背景，紧贴顶部
@@ -361,41 +371,29 @@ struct AMapViewRepresentable: UIViewRepresentable {
                 self.startWalkingNavigation(to: dest)
             }
         }
-        
-        // 定位按钮
+
+        /// 将地图中心移到当前位置（与聊天页右下角布局配套的定位按钮）
         @objc func locateUser() {
             guard let mapView = mapView else { return }
-            
-            print("📍 [定位] 用户点击定位按钮")
-            
-            // 如果已经有位置信息，直接跳转
+            mapView.showsCompass = false
+            mapView.showsScale = false
             if let userLoc = mapView.userLocation.location?.coordinate {
-                print("📍 [定位] 使用已有位置: \(userLoc)")
                 mapView.setCenter(userLoc, animated: true)
-                // 重新启用朝向指示器
-                mapView.userTrackingMode = .followWithHeading
+                mapView.userTrackingMode = .follow
                 return
             }
-            
-            // 如果没有位置信息，主动请求定位
-            print("📍 [定位] 主动请求定位...")
             let locationManager = AMapLocationManager()
             locationManager.desiredAccuracy = kCLLocationAccuracyBest
             locationManager.locationTimeout = 10
-            
             locationManager.requestLocation(withReGeocode: false) { location, _, error in
                 if let error = error {
                     print("❌ [定位] 定位失败: \(error.localizedDescription)")
                     return
                 }
-                
-                if let loc = location {
-                    print("✅ [定位] 定位成功: \(loc.coordinate)")
-                    DispatchQueue.main.async {
-                        mapView.setCenter(loc.coordinate, animated: true)
-                        // 重新启用朝向指示器
-                        mapView.userTrackingMode = .followWithHeading
-                    }
+                guard let loc = location else { return }
+                DispatchQueue.main.async {
+                    mapView.setCenter(loc.coordinate, animated: true)
+                    mapView.userTrackingMode = .follow
                 }
             }
         }
@@ -1376,7 +1374,7 @@ struct AMapViewRepresentable: UIViewRepresentable {
             mapView.setZoomLevel(16, animated: true)
             
             // 启用用户位置跟踪和朝向指示器
-            mapView.userTrackingMode = .followWithHeading // 启用朝向指示器
+            mapView.userTrackingMode = .follow
             
             print("✅ [导航] 已跳转到起始位置")
         }
