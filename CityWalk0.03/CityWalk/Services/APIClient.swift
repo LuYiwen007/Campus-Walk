@@ -39,11 +39,18 @@ final class APIClient {
         didSet { UserDefaults.standard.set(authToken, forKey: "campus_walk_token") }
     }
 
+    /// 长连接流式对话（SSE）
+    private let streamSession: URLSession
+
     init() {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 60
         config.timeoutIntervalForResource = 120
         session = URLSession(configuration: config)
+        let streamConfig = URLSessionConfiguration.default
+        streamConfig.timeoutIntervalForRequest = 120
+        streamConfig.timeoutIntervalForResource = 600
+        streamSession = URLSession(configuration: streamConfig)
         decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         decoder.dateDecodingStrategy = .custom { decoder in
@@ -131,15 +138,109 @@ final class APIClient {
         return try decodeEnvelope(data, as: [ChatMessageDTO].self)
     }
 
-    func sendMessage(conversationId: Int, content: String) async throws -> SendMessageResponseDTO {
-        struct Body: Encodable { let content: String }
-        let body = try encoder.encode(Body(content: content))
+    func sendMessage(conversationId: Int, content: String, imageJPEGData: Data? = nil) async throws -> SendMessageResponseDTO {
+        struct Body: Encodable {
+            let content: String
+            let imageBase64: String?
+            let imageMimeType: String?
+        }
+        let b64 = imageJPEGData.map { $0.base64EncodedString() }
+        let bodyObj = Body(
+            content: content,
+            imageBase64: b64,
+            imageMimeType: b64 != nil ? "image/jpeg" : nil
+        )
+        let body = try encoder.encode(bodyObj)
         let req = try makeRequest(path: "/api/v1/conversations/\(conversationId)/messages", method: "POST", body: body)
         let (data, resp) = try await session.data(for: req)
         guard let http = resp as? HTTPURLResponse, (200 ... 299).contains(http.statusCode) else {
             throw APIError.httpStatus((resp as? HTTPURLResponse)?.statusCode ?? -1, String(data: data, encoding: .utf8))
         }
         return try decodeEnvelope(data, as: SendMessageResponseDTO.self)
+    }
+
+    /// 流式发送消息：`event:user` → `route_batch` → `delta` → `done`；失败时 `event:error` 或 HTTP 非 2xx。
+    func sendMessageStream(
+        conversationId: Int,
+        content: String,
+        imageJPEGData: Data? = nil,
+        onUserMessage: (@MainActor (ChatMessageDTO) -> Void)? = nil,
+        onRouteBatch: (@MainActor (RouteBatchDTO) -> Void)? = nil,
+        onTextDelta: (@MainActor (String) -> Void)? = nil
+    ) async throws -> SendMessageResponseDTO {
+        struct Body: Encodable {
+            let content: String
+            let imageBase64: String?
+            let imageMimeType: String?
+        }
+        let b64 = imageJPEGData.map { $0.base64EncodedString() }
+        let bodyObj = Body(
+            content: content,
+            imageBase64: b64,
+            imageMimeType: b64 != nil ? "image/jpeg" : nil
+        )
+        let body = try encoder.encode(bodyObj)
+        let req = try makeRequest(path: "/api/v1/conversations/\(conversationId)/messages/stream", method: "POST", body: body)
+        let (bytes, resp) = try await streamSession.bytes(for: req)
+        guard let http = resp as? HTTPURLResponse else {
+            throw APIError.httpStatus(-1, nil)
+        }
+        guard (200 ... 299).contains(http.statusCode) else {
+            throw APIError.httpStatus(http.statusCode, nil)
+        }
+
+        var currentEvent = ""
+        var dataLines: [String] = []
+        var doneResult: SendMessageResponseDTO?
+
+        func flushBlock() async throws {
+            guard !dataLines.isEmpty else { return }
+            let payload = dataLines.joined(separator: "\n")
+            dataLines.removeAll()
+            let name = currentEvent.trimmingCharacters(in: .whitespacesAndNewlines)
+            currentEvent = ""
+            guard let d = payload.data(using: .utf8) else { return }
+            switch name {
+            case "user":
+                let dto = try decoder.decode(ChatMessageDTO.self, from: d)
+                await MainActor.run { onUserMessage?(dto) }
+            case "route_batch":
+                let batch = try decoder.decode(RouteBatchDTO.self, from: d)
+                await MainActor.run { onRouteBatch?(batch) }
+            case "delta":
+                let delta = try decoder.decode(StreamDeltaDTO.self, from: d)
+                if !delta.text.isEmpty {
+                    let t = delta.text
+                    await MainActor.run { onTextDelta?(t) }
+                }
+            case "done":
+                doneResult = try decoder.decode(SendMessageResponseDTO.self, from: d)
+            case "error":
+                let err = try decoder.decode(StreamErrorDTO.self, from: d)
+                throw APIError.serverMessage(err.message ?? "流式请求失败")
+            default:
+                break
+            }
+        }
+
+        for try await line in bytes.lines {
+            let trimmed = String(line).trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty {
+                try await flushBlock()
+                continue
+            }
+            if trimmed.hasPrefix("event:") {
+                currentEvent = String(trimmed.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+            } else if trimmed.hasPrefix("data:") {
+                dataLines.append(String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces))
+            }
+        }
+        try await flushBlock()
+
+        guard let out = doneResult else {
+            throw APIError.serverMessage("流式响应未收到 done 事件")
+        }
+        return out
     }
 
     func latestRouteBatch(conversationId: Int) async throws -> RouteBatchDTO? {
@@ -169,14 +270,24 @@ final class APIClient {
         return try decodeEnvelope(data, as: [CommunityPostDTO].self)
     }
 
-    func arRecognize(latitude: Double, longitude: Double, heading: Double, sessionId: Int?) async throws -> ARRecognizeDTO {
+    func arRecognize(latitude: Double, longitude: Double, heading: Double, sessionId: Int?, imageJPEGData: Data? = nil) async throws -> ARRecognizeDTO {
         struct Body: Encodable {
             let sessionId: Int?
             let latitude: Double
             let longitude: Double
             let heading: Double
+            let imageBase64: String?
+            let imageMimeType: String?
         }
-        let body = try encoder.encode(Body(sessionId: sessionId, latitude: latitude, longitude: longitude, heading: heading))
+        let b64 = imageJPEGData.map { $0.base64EncodedString() }
+        let body = try encoder.encode(Body(
+            sessionId: sessionId,
+            latitude: latitude,
+            longitude: longitude,
+            heading: heading,
+            imageBase64: b64,
+            imageMimeType: b64 != nil ? "image/jpeg" : nil
+        ))
         let req = try makeRequest(path: "/api/v1/ar/recognize", method: "POST", body: body)
         let (data, resp) = try await session.data(for: req)
         guard let http = resp as? HTTPURLResponse, (200 ... 299).contains(http.statusCode) else {
@@ -218,6 +329,9 @@ struct ChatMessageDTO: Decodable {
     let messageType: String
     let content: String
     let sentAt: String
+    /// 仅 route_plan 类型消息可能携带，与后端 assistant_message 关联的批次
+    let routeBatch: RouteBatchDTO?
+    let hasImage: Bool?
 }
 
 struct RouteVariantDTO: Decodable, Equatable, Hashable {
@@ -244,6 +358,15 @@ struct SendMessageResponseDTO: Decodable {
     let userMessage: ChatMessageDTO
     let assistantMessage: ChatMessageDTO
     let routeBatch: RouteBatchDTO
+}
+
+private struct StreamDeltaDTO: Decodable {
+    let text: String
+}
+
+private struct StreamErrorDTO: Decodable {
+    let code: Int?
+    let message: String?
 }
 
 struct CommunityPostDTO: Decodable, Identifiable {

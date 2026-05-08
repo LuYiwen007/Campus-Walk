@@ -13,6 +13,8 @@ import java.util.Optional;
 public interface RouteBatchRepository extends JpaRepository<RouteBatch, Long> {
     List<RouteBatch> findByConversationIdOrderByIdDesc(Long conversationId);
 
+    Optional<RouteBatch> findByAssistantMessageId(Long assistantMessageId);
+
     default Optional<RouteBatch> findLatestByConversationId(Long conversationId) {
         List<RouteBatch> list = findByConversationIdOrderByIdDesc(conversationId);
         return list.isEmpty() ? Optional.empty() : Optional.of(list.get(0));

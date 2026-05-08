@@ -1,13 +1,17 @@
 import SwiftUI
 import AVFoundation
 import CoreLocation
+import CoreImage
+import UIKit
 
-/// AR 建筑识别：调用后端 `/api/v1/ar/recognize`；建筑数据与坐标匹配在后端（种子库）。
+/// AR 建筑识别：相机帧 + 定位调用后端 `/api/v1/ar/recognize`（视觉 + 候选库，无图时回退坐标最近建筑）。
 struct ARBuildingInfoView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var infoText: String = "正在识别前方建筑…"
     @StateObject private var locationFetcher = ARBuildingLocationFetcher()
+    @StateObject private var frameSampler = ARCameraFrameSampler()
     @State private var session: AVCaptureSession = AVCaptureSession()
+    private let videoQueue = DispatchQueue(label: "campuswalk.arbuilding.video")
 
     var body: some View {
         NavigationStack {
@@ -45,12 +49,15 @@ struct ARBuildingInfoView: View {
                 let lat = coord?.latitude ?? ARBuildingLocationFetcher.fallbackSeed.latitude
                 let lon = coord?.longitude ?? ARBuildingLocationFetcher.fallbackSeed.longitude
                 let heading = locationFetcher.lastHeadingDegrees
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                let jpeg = frameSampler.peekLatestJPEG()
                 do {
                     let res = try await APIClient.shared.arRecognize(
                         latitude: lat,
                         longitude: lon,
                         heading: heading,
-                        sessionId: nil
+                        sessionId: nil,
+                        imageJPEGData: jpeg
                     )
                     await MainActor.run {
                         if let b = res.building {
@@ -78,10 +85,39 @@ struct ARBuildingInfoView: View {
                 if session.canAddInput(input) { session.addInput(input) }
             }
             let output = AVCaptureVideoDataOutput()
-            if session.canAddOutput(output) { session.addOutput(output) }
+            output.alwaysDiscardsLateVideoFrames = true
+            if session.canAddOutput(output) {
+                session.addOutput(output)
+                output.setSampleBufferDelegate(frameSampler, queue: videoQueue)
+            }
             session.commitConfiguration()
             session.startRunning()
         }
+    }
+}
+
+// MARK: - 相机最新帧（JPEG）
+
+private final class ARCameraFrameSampler: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+    private let lock = NSLock()
+    private var latestJPEG: Data?
+
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        let ci = CIImage(cvPixelBuffer: pb)
+        let ctx = CIContext()
+        guard let cg = ctx.createCGImage(ci, from: ci.extent) else { return }
+        let ui = UIImage(cgImage: cg, scale: 1, orientation: .right)
+        guard let j = ui.jpegData(compressionQuality: 0.52) else { return }
+        lock.lock()
+        latestJPEG = j
+        lock.unlock()
+    }
+
+    func peekLatestJPEG() -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        return latestJPEG
     }
 }
 

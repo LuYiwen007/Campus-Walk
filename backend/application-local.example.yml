@@ -1,6 +1,34 @@
-# 使用方式：复制为与 pom.xml 同目录下的 application-local.yml，填入密码后从 IDE 运行（工作目录须为 backend 模块根目录）。
-# 也可不设此文件，改为在运行配置里设置环境变量 MYSQL_PASSWORD（与 PythonProject/.env 中数据库密码一致）。
+# =============================================================================
+# 本文件是示例；请复制为同目录下的 application-local.yml 后填写。
+# application-local.yml 已在 .gitignore 中，不会被提交 —— 适合把 Key / 应用 ID / 长提示词直接写在「后端配置」里，Spring 启动即读取。
+# 若仍想用环境变量，可把下面的明文改成 ${VAR:} 形式。
+# =============================================================================
 
 spring:
   datasource:
     password: "你的MySQL密码"
+
+app:
+  # ---------- DashScope：可直接写明文（仅本机 yml）----------
+  dashscope-api-key: "sk-请替换为你的DashScope-API-Key"
+  dashscope-workspace: ""
+  dashscope-model: qwen-turbo
+  # 百炼里「对话/智能体」类应用的应用 ID（控制台复制）
+  dashscope-dialogue-app-id: "请替换为你的百炼应用ID"
+
+  # 含图路线规划、AR 识别视觉（一般不用改）
+  dashscope-compatible-chat-url: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+  dashscope-vision-model: qwen-vl-plus
+
+  # ---------- 路线规划：把模型平台里的 system 全文贴在这里（多行）----------
+  route-planner-system-prompt: |
+    请在这里粘贴 ROUTE_PLANNER 的完整 system 提示词（多行）。
+    删除本行示例后从第一行开始写你的真实提示词。
+
+  # ---------- 可选：AR 建筑识别专用 system（不配则用后端内置短提示）----------
+  # ar-building-vision-system-prompt: |
+  #   ...
+
+  # ---------- 其它（可选覆盖）----------
+  # jwt-secret: 本地可写长随机串
+  # cors-origins: http://localhost:3000,http://127.0.0.1:8081

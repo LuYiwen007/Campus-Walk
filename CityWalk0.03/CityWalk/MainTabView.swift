@@ -4,6 +4,8 @@ import MapKit
 // 地图状态共享对象，负责全局地图摄像头位置同步
 class SharedMapState: ObservableObject {
     @Published var cameraPosition: MapCameraPosition = .userLocation(followsHeading: true, fallback: .automatic)
+    /// 用户在聊天中确认某条路线后，按「起点 → 途经(最多3) → 终点」地名链交给地图做多段高德步行规划
+    @Published var pendingWalkLegPlaceNames: [String]?
 }
 
 // 主Tab视图，包含底部导航栏和各主页面
