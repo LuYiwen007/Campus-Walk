@@ -6,7 +6,6 @@ class MessageViewModel: ObservableObject {
     @Published var messages: [Message] = []
     @Published var inputText: String = ""
     @Published var isLoading: Bool = false
-    @Published var showSegmentedRoute: Bool = false
     /// 当前会话 ID（后端）
     @Published var conversationId: Int?
 
@@ -42,12 +41,8 @@ class MessageViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do {
-            var rows = try await api.listMessages(conversationId: cid).map { Message(dto: $0) }
-            if let batch = try await api.latestRouteBatch(conversationId: cid), !batch.variants.isEmpty {
-                if let idx = rows.lastIndex(where: { !$0.isUser && $0.messageType == "route_plan" }) {
-                    rows[idx].routeVariants = batch.variants
-                }
-            }
+            // 路线卡片数据以每条消息的 route_batch 为准（后端 messageToVo 已嵌入），不再用 latestRouteBatch 客户端拼接，避免误挂批次
+            let rows = try await api.listMessages(conversationId: cid).map { Message(dto: $0) }
             messages = rows
         } catch {
             messages.append(
@@ -68,45 +63,81 @@ class MessageViewModel: ObservableObject {
         isLoading = true
         Task {
             defer { isLoading = false }
-            do {
-                let res = try await api.sendMessage(conversationId: cid, content: text)
-                let u = Message(dto: res.userMessage)
-                let a = Message(dto: res.assistantMessage, routeVariants: res.routeBatch.variants)
-                messages.append(u)
-                messages.append(a)
-                maybeOfferSegmentedRoute()
-            } catch {
-                messages.append(
-                    Message(
-                        id: "err-\(UUID().uuidString)",
-                        content: "发送失败：\(error.localizedDescription)",
-                        isUser: false,
-                        timestamp: Date()
-                    )
-                )
-            }
+            await appendSendResult(conversationId: cid, content: text, imageJPEGData: nil)
         }
     }
 
     func sendImageMessage(data: Data) {
-        /// 后端暂未实现图片理解，仅作为文字占位提交
-        inputText = "[用户发送了一张图片，请根据常见校园步行需求给三条路线建议]"
-        sendMessage()
-        _ = data
-    }
-
-    private func maybeOfferSegmentedRoute() {
-        guard let last = messages.last, last.isRouteRecommendation else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            self.showSegmentedRoute = true
+        let caption = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        inputText = ""
+        guard let cid = conversationId else { return }
+        isLoading = true
+        Task {
+            defer { isLoading = false }
+            await appendSendResult(conversationId: cid, content: caption, imageJPEGData: data)
         }
     }
 
-    func showSegmentedRouteView() {
-        showSegmentedRoute = true
+    private func appendSendResult(conversationId cid: Int, content: String, imageJPEGData: Data?) async {
+        let insertAt = messages.count
+        let tempAsstId = "stream-\(UUID().uuidString)"
+        do {
+            let res = try await api.sendMessageStream(
+                conversationId: cid,
+                content: content,
+                imageJPEGData: imageJPEGData,
+                onUserMessage: { [weak self] dto in
+                    guard let self else { return }
+                    var m = Message(dto: dto)
+                    if let img = imageJPEGData { m.imageData = img }
+                    self.messages.append(m)
+                },
+                onRouteBatch: { [weak self] batch in
+                    guard let self else { return }
+                    self.messages.append(
+                        Message(
+                            id: tempAsstId,
+                            content: "",
+                            isUser: false,
+                            timestamp: Date(),
+                            messageType: "route_plan",
+                            routeVariants: batch.variants,
+                            imageData: nil,
+                            hasImageFromServer: false
+                        )
+                    )
+                },
+                onTextDelta: { [weak self] piece in
+                    guard let self else { return }
+                    guard let idx = self.messages.firstIndex(where: { $0.id == tempAsstId }) else { return }
+                    self.messages[idx].content += piece
+                }
+            )
+            if let userDto = res.userMessage, insertAt < messages.count, messages[insertAt].isUser {
+                var um = Message(dto: userDto)
+                if let img = imageJPEGData { um.imageData = img }
+                messages[insertAt] = um
+            }
+            if let idx = messages.firstIndex(where: { $0.id == tempAsstId }) {
+                let merged = res.routeBatch?.variants ?? res.assistantMessage.routeBatch?.variants
+                messages[idx] = Message(dto: res.assistantMessage, routeVariants: merged)
+            } else {
+                let merged = res.routeBatch?.variants ?? res.assistantMessage.routeBatch?.variants
+                messages.append(Message(dto: res.assistantMessage, routeVariants: merged))
+            }
+        } catch {
+            if messages.count > insertAt {
+                messages.removeSubrange(insertAt...)
+            }
+            messages.append(
+                Message(
+                    id: "err-\(UUID().uuidString)",
+                    content: "发送失败：\(error.localizedDescription)",
+                    isUser: false,
+                    timestamp: Date()
+                )
+            )
+        }
     }
 
-    func hideSegmentedRouteView() {
-        showSegmentedRoute = false
-    }
 }

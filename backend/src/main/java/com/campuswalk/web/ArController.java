@@ -23,7 +23,13 @@ public class ArController {
     public record ARSessionCreateBody(long routeVariantId, Map<String, Object> deviceInfo) {
     }
 
-    public record ARRecognizeBody(Long sessionId, double latitude, double longitude, double heading) {
+    public record ARRecognizeBody(Long sessionId, double latitude, double longitude, double heading,
+                                  String imageBase64, String imageMimeType) {
+        public ARRecognizeBody {
+            if (imageMimeType == null || imageMimeType.isBlank()) {
+                imageMimeType = "image/jpeg";
+            }
+        }
     }
 
     @PostMapping("/ar/sessions")
@@ -43,7 +49,8 @@ public class ArController {
     public ApiResponse<Map<String, Object>> recognize(@RequestBody ARRecognizeBody body) {
         var user = currentUserService.requireCurrentUser();
         double h = body.heading();
-        return ApiResponse.ok(arService.recognize(user, body.sessionId(), body.latitude(), body.longitude(), h));
+        return ApiResponse.ok(arService.recognize(user, body.sessionId(), body.latitude(), body.longitude(), h,
+                body.imageBase64(), body.imageMimeType()));
     }
 
     @GetMapping("/buildings/{buildingId}")

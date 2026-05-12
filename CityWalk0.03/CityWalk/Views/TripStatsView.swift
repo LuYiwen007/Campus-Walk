@@ -87,14 +87,13 @@ struct TripStatsView: View {
     }
 }
 
-// 新增：心率卡片组件
+// 新增：心率卡片组件（无设备数据时不展示假数值）
 struct HeartRateCardView: View {
-    // mock 数据
-    let heartRates: [Int] = [55, 58, 60, 62, 65, 64, 61, 59]
-    let current: Int = 59
-    let status: String = "正常"
-    let statusColor: Color = .green
-    let diff: Int = -3
+    let heartRates: [Int] = []
+    let current: Int? = nil
+    let status: String = "暂无数据"
+    let statusColor: Color = .secondary
+    let diff: Int? = nil
 
     var body: some View {
         HStack {
@@ -107,12 +106,18 @@ struct HeartRateCardView: View {
                         .font(.headline)
                         .foregroundColor(Color(.label))
                 }
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text("\(current)")
-                        .font(.system(size: 36, weight: .bold))
-                        .foregroundColor(Color(.label))
-                    Text("bpm")
-                        .font(.title3)
+                if let current {
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        Text("\(current)")
+                            .font(.system(size: 36, weight: .bold))
+                            .foregroundColor(Color(.label))
+                        Text("bpm")
+                            .font(.title3)
+                            .foregroundColor(.secondary)
+                    }
+                } else {
+                    Text("连接设备后将显示心率")
+                        .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
                 HStack(spacing: 6) {
@@ -123,13 +128,15 @@ struct HeartRateCardView: View {
                         .foregroundColor(statusColor)
                         .font(.subheadline)
                 }
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.down")
-                        .foregroundColor(.purple)
-                        .font(.subheadline)
-                    Text("\(diff) bpm 和昨天比较")
-                        .foregroundColor(.purple)
-                        .font(.subheadline)
+                if let diff {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.down")
+                            .foregroundColor(.purple)
+                            .font(.subheadline)
+                        Text("\(diff) bpm 和昨天比较")
+                            .foregroundColor(.purple)
+                            .font(.subheadline)
+                    }
                 }
             }
             Spacer()

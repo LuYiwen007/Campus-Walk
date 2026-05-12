@@ -60,16 +60,23 @@ struct MessageBubble: View {
                 .shadow(color: .black.opacity(0.1), radius: 5, y: 2)
         } else {
             if message.isUser {
-                Text(message.content)
-                    .font(.system(size: fontSize))
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(
-                        LinearGradient(gradient: Gradient(colors: [Color.blue.opacity(0.7), Color.blue]), startPoint: .topLeading, endPoint: .bottomTrailing)
-                    )
-                    .foregroundColor(.white)
-                    .cornerRadius(18, corners: [.topLeft, .topRight, .bottomLeft])
-                    .shadow(color: .blue.opacity(0.2), radius: 5, y: 2)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    if message.hasImageFromServer || message.imageData != nil {
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .font(.system(size: fontSize * 0.85))
+                            .foregroundColor(.white.opacity(0.95))
+                    }
+                    Text(message.content)
+                        .font(.system(size: fontSize))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(
+                    LinearGradient(gradient: Gradient(colors: [Color.blue.opacity(0.7), Color.blue]), startPoint: .topLeading, endPoint: .bottomTrailing)
+                )
+                .foregroundColor(.white)
+                .cornerRadius(18, corners: [.topLeft, .topRight, .bottomLeft])
+                .shadow(color: .blue.opacity(0.2), radius: 5, y: 2)
             } else {
                 Text(message.content)
                     .font(.system(size: fontSize))
@@ -119,27 +126,57 @@ struct MessageBubble: View {
         }
 
         if !message.isUser, let variants = message.routeVariants, !variants.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(variants, id: \.self) { v in
-                    Button {
-                        onRouteSelected(v)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(v.displayLabel)
-                                .font(.subheadline.weight(.bold))
-                            Text("\(v.startLabel) → \(v.endLabel) · 约 \(v.estimatedDurationSeconds / 60) 分钟 · \(v.estimatedDistanceMeters) m")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 0) {
+                Text("可选路线")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 6)
+                VStack(spacing: 0) {
+                    ForEach(Array(variants.enumerated()), id: \.element.id) { idx, v in
+                        HStack(alignment: .center, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(v.displayLabel)
+                                    .font(.subheadline.weight(.bold))
+                                Text("\(v.startLabel) → \(v.endLabel)")
+                                    .font(.caption)
+                                    .foregroundStyle(.primary)
+                                Text("约 \(v.estimatedDurationSeconds / 60) 分钟 · \(v.estimatedDistanceMeters) m")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                let samples = Array(v.scenicSpotExamples.prefix(3))
+                                if !samples.isEmpty {
+                                    Text("途经：\(samples.joined(separator: "、"))")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            Button("确认") {
+                                onRouteSelected(v)
+                            }
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.blue)
+                            .foregroundColor(.white)
+                            .clipShape(Capsule())
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding()
-                        .background(Color.blue.opacity(0.1))
-                        .foregroundColor(.blue)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 12)
+                        if idx < variants.count - 1 {
+                            Divider().padding(.leading, 8)
+                        }
                     }
                 }
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color.gray.opacity(0.25), lineWidth: 1)
+                )
             }
-            .padding(.top, 8)
+            .padding(.top, 10)
             .padding(.leading, 40 + 12)
             .padding(.trailing, 12)
         }

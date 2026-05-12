@@ -2,6 +2,8 @@ import SwiftUI
 import ARKit
 import RealityKit
 import CoreLocation
+import CoreImage
+import UIKit
 import AMapFoundationKit
 import AMapSearchKit
 import AMapNaviKit
@@ -428,6 +430,7 @@ fileprivate struct ARViewContainer: UIViewRepresentable {
         @Binding var isRecognitionModeEnabled: Bool
         @Binding var detectedBuildings: [DetectedBuilding]
         @Binding var currentDetectedBuilding: DetectedBuilding?
+        private var lastVisionRecognizeTime: CFTimeInterval = 0
 
         init(
             destination: CLLocationCoordinate2D, 
@@ -700,48 +703,74 @@ fileprivate struct ARViewContainer: UIViewRepresentable {
             }
         }
         
-        // MARK: - 识别模式相关方法（框架代码，待后续实现）
-        
-        /// 模拟建筑识别功能（待后续替换为真实识别）
-        private func simulateBuildingRecognition() {
+        // MARK: - 识别模式（ARFrame → 后端视觉 + 候选库）
+
+        func session(_ session: ARSession, didUpdate frame: ARFrame) {
             guard isRecognitionModeEnabled else { return }
-            
-            // 模拟识别结果
-            let mockBuildings = [
-                DetectedBuilding(
-                    name: "图书馆",
-                    confidence: 0.85,
-                    boundingBox: CGRect(x: 100, y: 200, width: 200, height: 150),
-                    description: "校园主图书馆，建于1995年，藏书丰富",
-                    poiId: 1
-                ),
-                DetectedBuilding(
-                    name: "教学楼A",
-                    confidence: 0.72,
-                    boundingBox: CGRect(x: 150, y: 300, width: 180, height: 120),
-                    description: "主要教学楼，包含多个教室和实验室",
-                    poiId: 2
-                )
-            ]
-            
-            // 随机选择一个建筑进行显示（模拟识别过程）
-            if let randomBuilding = mockBuildings.randomElement() {
-                DispatchQueue.main.async {
-                    self.currentDetectedBuilding = randomBuilding
+            let now = CACurrentMediaTime()
+            if now - lastVisionRecognizeTime < 4.0 { return }
+            guard let loc = lastLocation else { return }
+            let lat = loc.coordinate.latitude
+            let lon = loc.coordinate.longitude
+            guard lat != 0, lon != 0 else { return }
+            guard let jpeg = Self.jpegFromARFrame(frame) else { return }
+            lastVisionRecognizeTime = now
+            let headingDeg = lastHeading.map { h in h.trueHeading >= 0 ? h.trueHeading : h.magneticHeading } ?? 0
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    let res = try await APIClient.shared.arRecognize(
+                        latitude: lat,
+                        longitude: lon,
+                        heading: headingDeg,
+                        sessionId: nil,
+                        imageJPEGData: jpeg
+                    )
+                    await MainActor.run {
+                        if let b = res.building {
+                            let det = DetectedBuilding(
+                                name: b.name,
+                                confidence: Float(res.confidence),
+                                boundingBox: CGRect(x: 0.12, y: 0.36, width: 0.76, height: 0.34),
+                                description: b.description,
+                                poiId: b.id
+                            )
+                            self.detectedBuildings = [det]
+                            self.currentDetectedBuilding = det
+                        } else {
+                            self.detectedBuildings = []
+                            self.currentDetectedBuilding = nil
+                        }
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.detectedBuildings = []
+                        self.currentDetectedBuilding = nil
+                    }
                 }
             }
         }
-        
+
+        private static func jpegFromARFrame(_ frame: ARFrame, quality: CGFloat = 0.52) -> Data? {
+            let pb = frame.capturedImage
+            let ci = CIImage(cvPixelBuffer: pb)
+            let ctx = CIContext()
+            guard let cg = ctx.createCGImage(ci, from: ci.extent) else { return nil }
+            let ui = UIImage(cgImage: cg, scale: 1, orientation: .right)
+            return ui.jpegData(compressionQuality: quality)
+        }
+
         /// 开始识别模式
         func startRecognitionMode() {
-            // TODO: 实现真实的图像识别逻辑
-            print("识别模式已开启")
+            lastVisionRecognizeTime = 0
         }
-        
+
         /// 停止识别模式
         func stopRecognitionMode() {
-            // TODO: 停止图像识别
-            print("识别模式已关闭")
+            DispatchQueue.main.async {
+                self.detectedBuildings = []
+                self.currentDetectedBuilding = nil
+            }
         }
     }
 }

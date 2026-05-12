@@ -48,4 +48,11 @@ public class RouteVariant {
 
     @Column(columnDefinition = "TEXT")
     private String description = "";
+
+    /**
+     * 有序途经点（起点 → 途经 → 终点），坐标由后端高德 Web 地理编码写入。
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "waypoints", columnDefinition = "json")
+    private List<NavigationWaypoint> waypoints = new ArrayList<>();
 }

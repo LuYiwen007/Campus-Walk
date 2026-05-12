@@ -1,0 +1,22 @@
+# CocoaPods：勿提交，本地执行 `pod install`
+CityWalk0.03/Pods/
+
+# Maven / Spring Boot 构建输出
+backend/target/
+# 本地密钥与数据库密码（勿提交）
+backend/application-local.yml
+application-local.yml
+
+# Xcode
+**/xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.hmap
+DerivedData/
+
+# 系统
+.DS_Store
+
+# Python 虚拟环境与缓存（若需要可再放开跟踪）
+# PythonProject/.venv/
+# __pycache__/

@@ -34,6 +34,10 @@ class WalkingNavigationManager: NSObject, ObservableObject {
     private var navigationSteps: [WalkingNavigationStep] = []
     private var currentStepIndex: Int = 0
     
+    /// 语音节流：避免诱导回调过于频繁时连续播报
+    private var lastSpeechDate: Date = .distantPast
+    private var lastSpeechBucket: Int = -9999
+    
     override init() {
         super.init()
         setupLocationManager()
@@ -112,15 +116,16 @@ class WalkingNavigationManager: NSObject, ObservableObject {
         
         isNavigating = false
         currentInstruction = "导航已停止"
+        lastSpeechBucket = -9999
         
         // 停止位置更新
         locationManager.stopUpdatingLocation()
         
-        // 停止导航
+        // 停止导航（单例长期存活，不要 nil delegate，否则下次无法收到诱导回调）
         walkManager?.stopNavi()
+        walkManager?.delegate = self
         
-        // 清理资源
-        cleanup()
+        speakInstruction("导航已停止")
     }
     
     /// 暂停导航
@@ -202,21 +207,13 @@ class WalkingNavigationManager: NSObject, ObservableObject {
         speechSynthesizer.speak(utterance)
     }
     
-    /// 清理资源
+    /// 清理资源（仅用于实例释放；shared 单例一般不走这里）
     private func cleanup() {
-        // 停止位置更新
         locationManager.stopUpdatingLocation()
-        
-        // 清理 delegate，防止野指针
-        locationManager.delegate = nil
-        
-        // 清理高德导航组件
         if let walkView = walkView {
             walkManager?.removeDataRepresentative(walkView)
         }
         walkManager?.delegate = nil
-        
-        // 清理搜索API
         searchAPI?.delegate = nil
     }
     
@@ -232,6 +229,9 @@ extension WalkingNavigationManager: AMapNaviWalkManagerDelegate {
     /// 路线规划成功回调
     func walkManager(_ walkManager: AMapNaviWalkManager, onCalculateRouteSuccess type: AMapNaviRoutePlanType) {
         print("✅ [步行导航] 路线规划成功")
+        
+        lastSpeechBucket = -9999
+        lastSpeechDate = .distantPast
         
         DispatchQueue.main.async {
             self.currentInstruction = "路线规划成功，开始导航"
@@ -260,14 +260,22 @@ extension WalkingNavigationManager: AMapNaviWalkManagerDelegate {
     func walkManager(_ walkManager: AMapNaviWalkManager, updateNaviInfo naviInfo: AMapNaviInfo?) {
         guard let naviInfo = naviInfo else { return }
         
+        let roadName = naviInfo.nextRoadName ?? ""
+        let segRemain = Int(naviInfo.segmentRemainDistance)
+        let routeRemain = Double(naviInfo.routeRemainDistance)
+        
         DispatchQueue.main.async {
-            // 更新导航信息
-            self.currentInstruction = naviInfo.nextRoadName ?? "继续前进"
-            self.distanceToNext = Double(naviInfo.segmentRemainDistance)
-            self.distanceToDestination = Double(naviInfo.routeRemainDistance)
-            self.currentRoadName = naviInfo.nextRoadName ?? ""
+            let headline: String
+            if roadName.isEmpty {
+                headline = segRemain > 0 ? "沿路线前行，下一段 \(segRemain) 米" : "继续前进"
+            } else {
+                headline = segRemain > 0 ? "\(segRemain)米后\(roadName)" : roadName
+            }
+            self.currentInstruction = headline
+            self.distanceToNext = Double(segRemain)
+            self.distanceToDestination = routeRemain
+            self.currentRoadName = roadName
             
-            // 计算预计到达时间
             let timeInMinutes = naviInfo.routeRemainTime / 60
             if timeInMinutes < 60 {
                 self.estimatedArrivalTime = "\(timeInMinutes)分钟"
@@ -277,9 +285,23 @@ extension WalkingNavigationManager: AMapNaviWalkManagerDelegate {
                 self.estimatedArrivalTime = "\(hours)小时\(minutes)分钟"
             }
             
-            // 语音播报重要指令
-            if naviInfo.segmentRemainDistance < 50 && !naviInfo.nextRoadName.isEmpty {
-                self.speakInstruction("\(naviInfo.segmentRemainDistance)米后\(naviInfo.nextRoadName)")
+            // 语音：约每 50 米进度或至少间隔 8 秒播报一次（近路口更密）
+            let bucket = segRemain / 50
+            let now = Date()
+            let minInterval: TimeInterval = segRemain < 35 ? 4.0 : 8.0
+            let shouldSpeak = segRemain > 8 && (
+                bucket != self.lastSpeechBucket || now.timeIntervalSince(self.lastSpeechDate) >= minInterval
+            )
+            if shouldSpeak {
+                self.lastSpeechBucket = bucket
+                self.lastSpeechDate = now
+                let line: String
+                if roadName.isEmpty {
+                    line = "前方步行\(segRemain)米，请按地图路线前进"
+                } else {
+                    line = "\(segRemain)米后\(roadName)"
+                }
+                self.speakInstruction(line)
             }
         }
     }
