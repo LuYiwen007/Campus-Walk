@@ -55,6 +55,15 @@ public class AppProperties {
      * 环境变量：AR_BUILDING_VISION_SYSTEM_PROMPT
      */
     private String arBuildingVisionSystemPrompt = "";
+    /**
+     * 高德 Web 服务 Key（用于服务端地理编码，勿提交仓库；环境变量 AMAP_REST_KEY）。
+     * 未配置时途经点仅保存地名，客户端可回退为 SDK POI 检索。
+     */
+    private String amapRestKey = "";
+    /**
+     * 地理编码时附加城市，提高命中率（如：成都、北京市）。
+     */
+    private String amapGeocodeCity = "成都";
 
     public List<String> corsOriginList() {
         return Arrays.stream(corsOrigins.split(","))

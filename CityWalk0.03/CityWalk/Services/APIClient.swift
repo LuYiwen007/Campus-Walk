@@ -28,6 +28,30 @@ private struct APIEnvelope<T: Decodable>: Decodable {
     }
 }
 
+/// 流式/历史接口里数字、数组、文案形态不一致时的宽松解码
+private enum FlexibleJSON {
+    static func intKey<K: CodingKey>(_ c: KeyedDecodingContainer<K>, _ key: K) -> Int {
+        if let i = try? c.decode(Int.self, forKey: key) { return i }
+        if let s = try? c.decode(String.self, forKey: key), let i = Int(s) { return i }
+        if let d = try? c.decode(Double.self, forKey: key) { return Int(d.rounded()) }
+        return 0
+    }
+
+    static func stringKey<K: CodingKey>(_ c: KeyedDecodingContainer<K>, _ key: K) -> String {
+        (try? c.decode(String.self, forKey: key)) ?? ""
+    }
+
+    static func stringArrayKey<K: CodingKey>(_ c: KeyedDecodingContainer<K>, _ key: K) -> [String] {
+        (try? c.decode([String].self, forKey: key)) ?? []
+    }
+
+    static func optDouble<K: CodingKey>(_ c: KeyedDecodingContainer<K>, _ key: K) -> Double? {
+        if let x = try? c.decode(Double.self, forKey: key) { return x }
+        if let s = try? c.decode(String.self, forKey: key), let x = Double(s) { return x }
+        return nil
+    }
+}
+
 final class APIClient {
     static let shared = APIClient()
 
@@ -138,6 +162,34 @@ final class APIClient {
         return try decodeEnvelope(data, as: [ChatMessageDTO].self)
     }
 
+    /// 创建导航会话（途经点与进度由后端持有）
+    func createNavigationSession(routeVariantId: Int) async throws -> NavigationSessionDTO {
+        struct Body: Encodable {
+            let routeVariantId: Int
+        }
+        let body = try encoder.encode(Body(routeVariantId: routeVariantId))
+        let req = try makeRequest(path: "/api/v1/navigation/sessions", method: "POST", body: body)
+        let (data, resp) = try await session.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200 ... 299).contains(http.statusCode) else {
+            throw APIError.httpStatus((resp as? HTTPURLResponse)?.statusCode ?? -1, String(data: data, encoding: .utf8))
+        }
+        return try decodeEnvelope(data, as: NavigationSessionDTO.self)
+    }
+
+    func patchNavigationSession(sessionId: Int, activeLegIndex: Int?, status: String?) async throws -> NavigationSessionDTO {
+        struct Body: Encodable {
+            let activeLegIndex: Int?
+            let status: String?
+        }
+        let body = try encoder.encode(Body(activeLegIndex: activeLegIndex, status: status))
+        let req = try makeRequest(path: "/api/v1/navigation/sessions/\(sessionId)", method: "PATCH", body: body)
+        let (data, resp) = try await session.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200 ... 299).contains(http.statusCode) else {
+            throw APIError.httpStatus((resp as? HTTPURLResponse)?.statusCode ?? -1, String(data: data, encoding: .utf8))
+        }
+        return try decodeEnvelope(data, as: NavigationSessionDTO.self)
+    }
+
     func sendMessage(conversationId: Int, content: String, imageJPEGData: Data? = nil) async throws -> SendMessageResponseDTO {
         struct Body: Encodable {
             let content: String
@@ -202,19 +254,21 @@ final class APIClient {
             guard let d = payload.data(using: .utf8) else { return }
             switch name {
             case "user":
-                let dto = try decoder.decode(ChatMessageDTO.self, from: d)
+                let dto = try decodeStreamUserMessage(d)
                 await MainActor.run { onUserMessage?(dto) }
             case "route_batch":
-                let batch = try decoder.decode(RouteBatchDTO.self, from: d)
-                await MainActor.run { onRouteBatch?(batch) }
+                if let batch = try? decoder.decode(RouteBatchDTO.self, from: d) {
+                    await MainActor.run { onRouteBatch?(batch) }
+                }
             case "delta":
-                let delta = try decoder.decode(StreamDeltaDTO.self, from: d)
-                if !delta.text.isEmpty {
-                    let t = delta.text
-                    await MainActor.run { onTextDelta?(t) }
+                if let delta = try? decoder.decode(StreamDeltaDTO.self, from: d) {
+                    let t = delta.text ?? ""
+                    if !t.isEmpty { await MainActor.run { onTextDelta?(t) } }
+                } else if let s = try? decoder.decode(String.self, from: d), !s.isEmpty {
+                    await MainActor.run { onTextDelta?(s) }
                 }
             case "done":
-                doneResult = try decoder.decode(SendMessageResponseDTO.self, from: d)
+                doneResult = try decodeStreamDonePayload(d)
             case "error":
                 let err = try decoder.decode(StreamErrorDTO.self, from: d)
                 throw APIError.serverMessage(err.message ?? "流式请求失败")
@@ -295,6 +349,32 @@ final class APIClient {
         }
         return try decodeEnvelope(data, as: ARRecognizeDTO.self)
     }
+
+    /// 流式 `done`：根对象、仅 `data` 包裹、或统一 API 信封
+    private func decodeStreamDonePayload(_ data: Data) throws -> SendMessageResponseDTO {
+        if let r = try? decoder.decode(SendMessageResponseDTO.self, from: data) { return r }
+        struct DataShell: Decodable { let data: SendMessageResponseDTO }
+        if let s = try? decoder.decode(DataShell.self, from: data) { return s.data }
+        if let env = try? decoder.decode(APIEnvelope<SendMessageResponseDTO>.self, from: data), env.success, let p = env.data {
+            return p
+        }
+        let snippet = String(data: data, encoding: .utf8).map { String($0.prefix(320)) } ?? ""
+        throw APIError.serverMessage(snippet.isEmpty ? "无法解析流式结束(done)数据" : "无法解析流式结束(done)数据，片段：\(snippet)")
+    }
+
+    /// 流式 `user`：`data` 包裹、API 信封、或 `message` 单键
+    private func decodeStreamUserMessage(_ data: Data) throws -> ChatMessageDTO {
+        if let m = try? decoder.decode(ChatMessageDTO.self, from: data) { return m }
+        struct DataShell: Decodable { let data: ChatMessageDTO }
+        if let s = try? decoder.decode(DataShell.self, from: data) { return s.data }
+        struct MsgShell: Decodable { let message: ChatMessageDTO }
+        if let s = try? decoder.decode(MsgShell.self, from: data) { return s.message }
+        if let env = try? decoder.decode(APIEnvelope<ChatMessageDTO>.self, from: data), env.success, let m = env.data {
+            return m
+        }
+        let snippet = String(data: data, encoding: .utf8).map { String($0.prefix(320)) } ?? ""
+        throw APIError.serverMessage(snippet.isEmpty ? "无法解析流式用户(user)消息" : "无法解析流式用户(user)消息，片段：\(snippet)")
+    }
 }
 
 // MARK: - DTOs
@@ -326,12 +406,46 @@ struct ChatMessageDTO: Decodable {
     let id: Int
     let conversationId: Int
     let role: String
-    let messageType: String
+    let messageType: String?
     let content: String
-    let sentAt: String
+    /// 部分流式片段或非标响应可能缺省时间戳
+    let sentAt: String?
     /// 仅 route_plan 类型消息可能携带，与后端 assistant_message 关联的批次
     let routeBatch: RouteBatchDTO?
     let hasImage: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id, conversationId, role, messageType, content, sentAt, routeBatch, hasImage
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = FlexibleJSON.intKey(c, .id)
+        conversationId = FlexibleJSON.intKey(c, .conversationId)
+        role = try c.decodeIfPresent(String.self, forKey: .role) ?? "assistant"
+        messageType = try c.decodeIfPresent(String.self, forKey: .messageType)
+        content = try c.decodeIfPresent(String.self, forKey: .content) ?? ""
+        sentAt = try c.decodeIfPresent(String.self, forKey: .sentAt)
+        routeBatch = try c.decodeIfPresent(RouteBatchDTO.self, forKey: .routeBatch)
+        hasImage = try c.decodeIfPresent(Bool.self, forKey: .hasImage)
+    }
+}
+
+struct NavigationWaypointDTO: Decodable, Equatable, Hashable {
+    let order: Int
+    let label: String
+    let latitude: Double?
+    let longitude: Double?
+
+    enum CodingKeys: String, CodingKey { case order, label, latitude, longitude }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        order = FlexibleJSON.intKey(c, .order)
+        label = FlexibleJSON.stringKey(c, .label)
+        latitude = FlexibleJSON.optDouble(c, .latitude)
+        longitude = FlexibleJSON.optDouble(c, .longitude)
+    }
 }
 
 struct RouteVariantDTO: Decodable, Equatable, Hashable {
@@ -345,6 +459,36 @@ struct RouteVariantDTO: Decodable, Equatable, Hashable {
     let estimatedDurationSeconds: Int
     let estimatedDistanceMeters: Int
     let description: String
+    /// 后端持久化途经点（含坐标）；旧数据可能为 nil
+    let waypoints: [NavigationWaypointDTO]?
+
+    enum CodingKeys: String, CodingKey {
+        case id, routeNumber, displayLabel, startLabel, endLabel, scenicSpotCount
+        case scenicSpotExamples, estimatedDurationSeconds, estimatedDistanceMeters, description, waypoints
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = FlexibleJSON.intKey(c, .id)
+        routeNumber = FlexibleJSON.intKey(c, .routeNumber)
+        displayLabel = FlexibleJSON.stringKey(c, .displayLabel)
+        startLabel = FlexibleJSON.stringKey(c, .startLabel)
+        endLabel = FlexibleJSON.stringKey(c, .endLabel)
+        scenicSpotCount = FlexibleJSON.intKey(c, .scenicSpotCount)
+        scenicSpotExamples = FlexibleJSON.stringArrayKey(c, .scenicSpotExamples)
+        estimatedDurationSeconds = FlexibleJSON.intKey(c, .estimatedDurationSeconds)
+        estimatedDistanceMeters = FlexibleJSON.intKey(c, .estimatedDistanceMeters)
+        description = FlexibleJSON.stringKey(c, .description)
+        waypoints = try? c.decode([NavigationWaypointDTO].self, forKey: .waypoints)
+    }
+}
+
+struct NavigationSessionDTO: Decodable, Equatable {
+    let id: Int
+    let routeVariantId: Int
+    let activeLegIndex: Int
+    let status: String
+    let waypoints: [NavigationWaypointDTO]
 }
 
 struct RouteBatchDTO: Decodable {
@@ -352,16 +496,43 @@ struct RouteBatchDTO: Decodable {
     let conversationId: Int
     let createdAt: String
     let variants: [RouteVariantDTO]
+
+    enum CodingKeys: String, CodingKey {
+        case id, conversationId, createdAt, variants
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(Int.self, forKey: .id) ?? 0
+        conversationId = try c.decodeIfPresent(Int.self, forKey: .conversationId) ?? 0
+        createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt) ?? ""
+        variants = try c.decodeIfPresent([RouteVariantDTO].self, forKey: .variants) ?? []
+    }
 }
 
 struct SendMessageResponseDTO: Decodable {
-    let userMessage: ChatMessageDTO
+    /// 流式 done 里可能只回 assistant，不再重复 user
+    let userMessage: ChatMessageDTO?
     let assistantMessage: ChatMessageDTO
-    let routeBatch: RouteBatchDTO
+    /// 无路线规划时后端可能省略
+    let routeBatch: RouteBatchDTO?
 }
 
 private struct StreamDeltaDTO: Decodable {
-    let text: String
+    let text: String?
+
+    init(from decoder: Decoder) throws {
+        if let svc = try? decoder.singleValueContainer(), let s = try? svc.decode(String.self) {
+            text = s
+            return
+        }
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        text = try c.decodeIfPresent(String.self, forKey: .text)
+            ?? c.decodeIfPresent(String.self, forKey: .delta)
+            ?? c.decodeIfPresent(String.self, forKey: .content)
+    }
+
+    private enum CodingKeys: String, CodingKey { case text, delta, content }
 }
 
 private struct StreamErrorDTO: Decodable {

@@ -81,32 +81,19 @@ struct MessageView: View {
                     startCoordinateBinding: $startCoordinate,
                     isNavigationMode: $isNavigationMode,
                     pendingWalkLegPlaceNames: sharedMapState.pendingWalkLegPlaceNames,
-                    onConsumePendingWalkLeg: { sharedMapState.pendingWalkLegPlaceNames = nil }
-                )
-                .ignoresSafeArea()
-                .transition(.opacity)
-                
-                // 右下角聊天按钮
-                HStack {
-                    Spacer()
-                    Button(action: {
+                    onConsumePendingWalkLeg: { sharedMapState.pendingWalkLegPlaceNames = nil },
+                    pendingNavigationSession: sharedMapState.pendingNavigationSession,
+                    onConsumePendingNavigationSession: { sharedMapState.pendingNavigationSession = nil },
+                    onBackToChat: {
                         withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                             isChatMinimized = false
                             showChat = true
                             routeToShow = nil
                         }
-                    }) {
-                        Image(systemName: "bubble.left.and.bubble.right.fill")
-                            .foregroundColor(.white)
-                            .font(.system(size: 20, weight: .bold))
-                            .frame(width: 50, height: 50)
-                            .background(Color.blue)
-                            .clipShape(Circle())
-                            .shadow(radius: 4)
                     }
-                }
-                .padding(.trailing, 17)
-                .padding(.bottom, 30)
+                )
+                .ignoresSafeArea()
+                .transition(.opacity)
             }
             // 聊天主页面
             if showChat {
@@ -146,13 +133,27 @@ struct MessageView: View {
                     LazyVStack(spacing: 12) {
                         ForEach(viewModel.messages) { message in
                             MessageBubble(message: message, userAvatar: userBubbleAvatar, viewModel: viewModel) { variant in
-                                let chain = Self.walkPlaceNameChain(from: variant)
-                                sharedMapState.pendingWalkLegPlaceNames = chain
-                                withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-                                    let samples = Array(variant.scenicSpotExamples.prefix(3)).joined(separator: "、")
-                                    self.routeToShow = "\(variant.displayLabel)：\(variant.startLabel) → \(variant.endLabel)\(samples.isEmpty ? "" : "（途经：\(samples)）")\n\(variant.description)"
-                                    isChatMinimized = true
-                                    showChat = false
+                                Task {
+                                    do {
+                                        let navSession = try await APIClient.shared.createNavigationSession(routeVariantId: variant.id)
+                                        await MainActor.run {
+                                            sharedMapState.pendingNavigationSession = navSession
+                                            sharedMapState.pendingWalkLegPlaceNames = nil
+                                        }
+                                    } catch {
+                                        await MainActor.run {
+                                            sharedMapState.pendingNavigationSession = nil
+                                            sharedMapState.pendingWalkLegPlaceNames = Self.walkPlaceNameChain(from: variant)
+                                        }
+                                    }
+                                    await MainActor.run {
+                                        let samples = Array(variant.scenicSpotExamples.prefix(3)).joined(separator: "、")
+                                        self.routeToShow = "\(variant.displayLabel)：\(variant.startLabel) → \(variant.endLabel)\(samples.isEmpty ? "" : "（途经：\(samples)）")\n\(variant.description)"
+                                        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                                            self.isChatMinimized = true
+                                            self.showChat = false
+                                        }
+                                    }
                                 }
                             }
                             .id(message.id)

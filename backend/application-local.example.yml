@@ -29,6 +29,10 @@ app:
   # ar-building-vision-system-prompt: |
   #   ...
 
+  # ---------- 高德 Web：服务端地理编码途经点（环境变量 AMAP_REST_KEY 亦可）----------
+  # amap-rest-key: "你的高德Web服务Key"
+  # amap-geocode-city: 成都
+
   # ---------- 其它（可选覆盖）----------
   # jwt-secret: 本地可写长随机串
   # cors-origins: http://localhost:3000,http://127.0.0.1:8081

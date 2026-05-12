@@ -3,6 +3,7 @@ package com.campuswalk.service;
 import com.campuswalk.dto.ChatTurn;
 import com.campuswalk.entity.ChatMessage;
 import com.campuswalk.entity.Conversation;
+import com.campuswalk.entity.NavigationWaypoint;
 import com.campuswalk.entity.RouteBatch;
 import com.campuswalk.entity.RouteVariant;
 import com.campuswalk.entity.User;
@@ -47,6 +48,7 @@ public class ConversationService {
     private final RouteVariantRepository routeVariantRepository;
     private final LlmRouteService llmRouteService;
     private final TransactionTemplate transactionTemplate;
+    private final RouteWaypointEnrichmentService routeWaypointEnrichmentService;
 
     public Conversation requireOwned(User user, long conversationId) {
         Conversation conv = conversationRepository.findById(conversationId)
@@ -176,10 +178,9 @@ public class ConversationService {
             v.setEstimatedDurationSeconds(durMin * 60);
             v.setEstimatedDistanceMeters(((Number) r.get("estimated_distance_meters")).intValue());
             v.setDescription((String) r.getOrDefault("description", ""));
+            routeWaypointEnrichmentService.attachWaypoints(v);
             routeVariantRepository.save(v);
         }
-
-        userMsg = chatMessageRepository.findById(userMsg.getId()).orElseThrow();
         assistantMsg = chatMessageRepository.findById(assistantMsg.getId()).orElseThrow();
         batch = routeBatchRepository.findById(batch.getId()).orElseThrow();
         List<RouteVariant> variants = routeVariantRepository.findByBatchIdOrderByRouteNumber(batch.getId());
@@ -283,6 +284,7 @@ public class ConversationService {
                     v.setEstimatedDurationSeconds(durMin * 60);
                     v.setEstimatedDistanceMeters(((Number) r.get("estimated_distance_meters")).intValue());
                     v.setDescription((String) r.getOrDefault("description", ""));
+                    routeWaypointEnrichmentService.attachWaypoints(v);
                     routeVariantRepository.save(v);
                 }
                 return new RouteTx(assistantMsg.getId(), batch.getId());
@@ -437,7 +439,26 @@ public class ConversationService {
         m.put("estimated_duration_seconds", v.getEstimatedDurationSeconds());
         m.put("estimated_distance_meters", v.getEstimatedDistanceMeters());
         m.put("description", v.getDescription());
+        m.put("waypoints", waypointListToVo(v.getWaypoints()));
         return m;
+    }
+
+    private List<Map<String, Object>> waypointListToVo(List<NavigationWaypoint> wps) {
+        if (wps == null || wps.isEmpty()) {
+            return List.of();
+        }
+        return wps.stream().map(w -> {
+            Map<String, Object> wm = new LinkedHashMap<>();
+            wm.put("order", w.getOrder());
+            wm.put("label", w.getLabel());
+            if (w.getLatitude() != null) {
+                wm.put("latitude", w.getLatitude());
+            }
+            if (w.getLongitude() != null) {
+                wm.put("longitude", w.getLongitude());
+            }
+            return wm;
+        }).toList();
     }
 
     private Map<String, Object> batchToVo(RouteBatch batch, List<RouteVariant> variants) {

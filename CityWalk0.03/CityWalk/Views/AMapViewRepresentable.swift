@@ -16,6 +16,15 @@ final class LegIndexedPolyline: MAPolyline {
     var legIndex: Int = 0
 }
 
+/// POI 检索后可选的步行方案（高德可能返回多条 path）
+struct POIRouteOption {
+    let distanceM: Int
+    let durationSec: Int
+    let coordinates: [CLLocationCoordinate2D]
+    let steps: [AMapStep]
+    let stepCoords: [[CLLocationCoordinate2D]]
+}
+
 struct AMapViewRepresentable: UIViewRepresentable {
     // 基本属性
     let startCoordinate: CLLocationCoordinate2D?
@@ -25,11 +34,14 @@ struct AMapViewRepresentable: UIViewRepresentable {
     /// 聊天确认后的地名链（起点、途经点…、终点），将依次 POI 检索并分段请求高德步行路径
     var pendingWalkLegPlaceNames: [String]? = nil
     var onConsumePendingWalkLeg: (() -> Void)? = nil
+    /// 后端导航会话（方案 2 分段 + 进度落库）
+    var pendingNavigationSession: NavigationSessionDTO? = nil
+    var onConsumePendingNavigationSession: (() -> Void)? = nil
 
-    // 导航相关
-    @StateObject private var walkNavManager = SimpleNavigationManager.shared
     var onNavigationStart: (() -> Void)? = nil
     var onNavigationStop: (() -> Void)? = nil
+    /// 地图全屏时右下角「返回聊天」，与 AR、定位同一套贴底/贴选路面板自适应
+    var onBackToChat: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -57,7 +69,8 @@ struct AMapViewRepresentable: UIViewRepresentable {
         mapView.userLocation.subtitle = "当前位置"
         
         context.coordinator.mapView = mapView
-        
+        context.coordinator.applyUserLocationHeadingIndicator(mapView, navigating: false)
+
         // 申请位置权限并定位到用户位置
         let locationManager = AMapLocationManager()
         locationManager.delegate = context.coordinator
@@ -104,6 +117,7 @@ struct AMapViewRepresentable: UIViewRepresentable {
             searchView.delegate = context.coordinator
             searchView.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(searchView)
+            context.coordinator.searchBarView = searchView
             NSLayoutConstraint.activate([
                 searchView.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor, constant: 12),
                 searchView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
@@ -111,71 +125,73 @@ struct AMapViewRepresentable: UIViewRepresentable {
                 searchView.heightAnchor.constraint(equalToConstant: 52)
             ])
         }
-        
-        // 与 MessageView 右下角聊天按钮对齐：50×50、底边距 30、右侧 17
-        let mapFloatingChatSize: CGFloat = 50
-        let mapFloatingChatBottomInset: CGFloat = 30
-        let mapFloatingStackGap: CGFloat = 12
 
-        // AR 按钮（最上）
+        let mapFloatingBtnSize: CGFloat = 50
+        let mapFloatingCorner: CGFloat = 14
+
+        // 右侧三键：上 AR — 中 返回聊天 — 下 定位；位置由 updateFloatingStackLayout 统一约束
         let arBtn = UIButton(type: .custom)
         arBtn.setTitle("AR", for: .normal)
         arBtn.titleLabel?.font = UIFont.boldSystemFont(ofSize: 16)
         arBtn.setTitleColor(.white, for: .normal)
         arBtn.setTitleColor(.white.withAlphaComponent(0.6), for: .disabled)
-        arBtn.backgroundColor = .systemGray // 初始状态为灰色
-        arBtn.layer.cornerRadius = 18
+        arBtn.backgroundColor = .systemGray
+        arBtn.layer.cornerRadius = mapFloatingCorner
+        arBtn.layer.masksToBounds = true
         arBtn.layer.shadowOpacity = 0.12
-        arBtn.layer.shadowRadius = 6
+        arBtn.layer.shadowRadius = 4
         arBtn.translatesAutoresizingMaskIntoConstraints = false
-        arBtn.isEnabled = false // 初始状态为禁用
+        arBtn.isEnabled = false
         arBtn.addTarget(context.coordinator, action: #selector(Coordinator.openARDirect), for: .touchUpInside)
         container.addSubview(arBtn)
         context.coordinator.arButton = arBtn
 
-        // 定位按钮（中间，与聊天按钮同大 50×50）
+        let chatBtn = UIButton(type: .custom)
+        chatBtn.setImage(UIImage(systemName: "bubble.left.and.bubble.right.fill"), for: .normal)
+        chatBtn.tintColor = .white
+        chatBtn.backgroundColor = .systemBlue
+        chatBtn.layer.cornerRadius = mapFloatingCorner
+        chatBtn.layer.masksToBounds = true
+        chatBtn.translatesAutoresizingMaskIntoConstraints = false
+        chatBtn.addTarget(context.coordinator, action: #selector(Coordinator.backToChatTapped), for: .touchUpInside)
+        container.addSubview(chatBtn)
+        context.coordinator.chatBackButton = chatBtn
+
         let locateBtn = UIButton(type: .custom)
         locateBtn.setImage(UIImage(systemName: "location.fill"), for: .normal)
         locateBtn.tintColor = .systemBlue
         locateBtn.backgroundColor = .white
-        locateBtn.layer.cornerRadius = mapFloatingChatSize / 2
+        locateBtn.layer.cornerRadius = mapFloatingCorner
+        locateBtn.layer.masksToBounds = true
         locateBtn.layer.shadowColor = UIColor.black.cgColor
         locateBtn.layer.shadowOpacity = 0.12
         locateBtn.layer.shadowOffset = CGSize(width: 0, height: 2)
-        locateBtn.layer.shadowRadius = 6
+        locateBtn.layer.shadowRadius = 4
         locateBtn.translatesAutoresizingMaskIntoConstraints = false
         locateBtn.addTarget(context.coordinator, action: #selector(Coordinator.locateUser), for: .touchUpInside)
         container.addSubview(locateBtn)
+        context.coordinator.locateButton = locateBtn
 
         NSLayoutConstraint.activate([
             arBtn.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -17),
-            arBtn.widthAnchor.constraint(equalToConstant: 48),
-            arBtn.heightAnchor.constraint(equalToConstant: 36),
-            arBtn.bottomAnchor.constraint(equalTo: locateBtn.topAnchor, constant: -mapFloatingStackGap),
-
+            arBtn.widthAnchor.constraint(equalToConstant: mapFloatingBtnSize),
+            arBtn.heightAnchor.constraint(equalToConstant: mapFloatingBtnSize),
+            chatBtn.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -17),
+            chatBtn.widthAnchor.constraint(equalToConstant: mapFloatingBtnSize),
+            chatBtn.heightAnchor.constraint(equalToConstant: mapFloatingBtnSize),
             locateBtn.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -17),
-            locateBtn.widthAnchor.constraint(equalToConstant: mapFloatingChatSize),
-            locateBtn.heightAnchor.constraint(equalToConstant: mapFloatingChatSize),
-            locateBtn.bottomAnchor.constraint(
-                equalTo: container.bottomAnchor,
-                constant: -(mapFloatingChatBottomInset + mapFloatingChatSize + mapFloatingStackGap)
-            )
+            locateBtn.widthAnchor.constraint(equalToConstant: mapFloatingBtnSize),
+            locateBtn.heightAnchor.constraint(equalToConstant: mapFloatingBtnSize)
         ])
-        
-        // 信息卡片
-        let infoCard = context.coordinator.infoCardView
-        infoCard.isHidden = true
-        infoCard.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(infoCard)
-        NSLayoutConstraint.activate([
-            infoCard.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
-            infoCard.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
-            infoCard.bottomAnchor.constraint(equalTo: container.safeAreaLayoutGuide.bottomAnchor, constant: -16)
-        ])
-        
-        // 导航UI
+
+        context.coordinator.mapContainerView = container
+
+        // 导航 UI（顶栏信息 + 底栏仅退出/语音）
         addNavigationUI(to: container, coordinator: context.coordinator)
-        
+
+        context.coordinator.updateFloatingStackLayout()
+        context.coordinator.bringFloatingButtonsToFront()
+
         return container
     }
     
@@ -184,8 +200,14 @@ struct AMapViewRepresentable: UIViewRepresentable {
 
         mapView.showsCompass = false
         mapView.showsScale = false
-        if mapView.userTrackingMode != .follow {
-            mapView.userTrackingMode = .follow
+        // 导航中保持跟朝向，避免 SwiftUI 刷新把模式打回 .follow
+        if !context.coordinator.isNavigating {
+            if mapView.userTrackingMode != .follow {
+                mapView.userTrackingMode = .follow
+            }
+        } else if mapView.userTrackingMode != .followWithHeading {
+            mapView.userTrackingMode = .followWithHeading
+            context.coordinator.applyUserLocationHeadingIndicator(mapView, navigating: true)
         }
 
         // 如果正在导航或多段路线规划中，不要清除覆盖层
@@ -193,14 +215,15 @@ struct AMapViewRepresentable: UIViewRepresentable {
             mapView.removeOverlays(mapView.overlays)
         }
         
-        // 设置中心点
-        if let start = startCoordinate {
+        // 仅在非导航下根据绑定调整中心；导航中若仍 setCenter(start)，会与 followWithHeading 抢中心，朝向扇区/箭头不显示或异常
+        if !context.coordinator.isNavigating, let start = startCoordinate {
             mapView.setCenter(start, animated: false)
             mapView.userTrackingMode = .follow
         }
 
-        if let center = centerCoordinate {
+        if !context.coordinator.isNavigating, let center = centerCoordinate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                guard !context.coordinator.isNavigating else { return }
                 mapView.setCenter(center, animated: true)
                 mapView.userTrackingMode = .follow
             }
@@ -218,124 +241,131 @@ struct AMapViewRepresentable: UIViewRepresentable {
             }
         }
 
+        if let session = pendingNavigationSession,
+           !context.coordinator.isNavigating,
+           session.id != context.coordinator.lastIngestedNavigationSessionId {
+            context.coordinator.ingestPendingNavigationSession(session, mapView: mapView)
+            onConsumePendingNavigationSession?()
+        }
+
         if let names = pendingWalkLegPlaceNames, names.count >= 2, !context.coordinator.isMultiLegRouting {
             context.coordinator.beginMultiLegWalking(names: names, mapView: mapView)
         }
     }
 
-    // MARK: - 导航UI - 按照高德官方样式
+    // MARK: - 导航 UI：顶栏（转向/朝向/剩余）贴搜索栏位置；底栏仅退出/语音贴容器底（与 Tab 上沿对齐）
     private func addNavigationUI(to container: UIView, coordinator: Coordinator) {
-        // 顶部导航信息栏 - 深色背景，紧贴顶部
-        let topInfoView = UIView()
-        topInfoView.backgroundColor = UIColor.black.withAlphaComponent(0.9)
-        topInfoView.translatesAutoresizingMaskIntoConstraints = false
-        topInfoView.isHidden = true
-        
-        // 转向图标
-        let turnIconView = UIImageView()
-        turnIconView.contentMode = .scaleAspectFit
-        turnIconView.image = UIImage(systemName: "arrow.right")
-        turnIconView.tintColor = .white
-        turnIconView.translatesAutoresizingMaskIntoConstraints = false
-        topInfoView.addSubview(turnIconView)
-        
-        // 导航指令 - 合并距离和道路名称
-        let instructionLabel = UILabel()
-        instructionLabel.text = "200米后进入天府大道"
-        instructionLabel.textColor = .white
-        instructionLabel.font = UIFont.systemFont(ofSize: 16, weight: .medium)
-        instructionLabel.numberOfLines = 1
-        instructionLabel.translatesAutoresizingMaskIntoConstraints = false
-        topInfoView.addSubview(instructionLabel)
-        
-        container.addSubview(topInfoView)
-        
-        NSLayoutConstraint.activate([
-            // 顶部信息栏 - 紧贴顶部
-            topInfoView.topAnchor.constraint(equalTo: container.topAnchor, constant: 0),
-            topInfoView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 0),
-            topInfoView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: 0),
-            topInfoView.heightAnchor.constraint(equalToConstant: 60),
-            
-            // 转向图标
-            turnIconView.leadingAnchor.constraint(equalTo: topInfoView.leadingAnchor, constant: 16),
-            turnIconView.centerYAnchor.constraint(equalTo: topInfoView.centerYAnchor),
-            turnIconView.widthAnchor.constraint(equalToConstant: 24),
-            turnIconView.heightAnchor.constraint(equalToConstant: 24),
-            
-            // 导航指令
-            instructionLabel.leadingAnchor.constraint(equalTo: turnIconView.trailingAnchor, constant: 12),
-            instructionLabel.centerYAnchor.constraint(equalTo: topInfoView.centerYAnchor),
-            instructionLabel.trailingAnchor.constraint(equalTo: topInfoView.trailingAnchor, constant: -16)
-        ])
-        
-        // 底部导航控制栏 - 深色背景，按照高德官方样式
-        let bottomNavView = UIView()
-        bottomNavView.backgroundColor = UIColor.black.withAlphaComponent(0.9)
-        bottomNavView.translatesAutoresizingMaskIntoConstraints = false
-        bottomNavView.isHidden = true
-        
-        // 退出按钮
+        let topCard = UIView()
+        topCard.backgroundColor = UIColor.black.withAlphaComponent(0.92)
+        topCard.layer.cornerRadius = 16
+        topCard.layer.masksToBounds = true
+        topCard.translatesAutoresizingMaskIntoConstraints = false
+        topCard.isHidden = true
+
+        let bottomBar = UIView()
+        bottomBar.backgroundColor = UIColor.black.withAlphaComponent(0.92)
+        bottomBar.layer.cornerRadius = 16
+        bottomBar.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        bottomBar.layer.masksToBounds = true
+        bottomBar.translatesAutoresizingMaskIntoConstraints = false
+        bottomBar.isHidden = true
+
         let exitButton = UIButton(type: .system)
         exitButton.setTitle("退出", for: .normal)
         exitButton.setTitleColor(.white, for: .normal)
-        exitButton.backgroundColor = UIColor.red.withAlphaComponent(0.8)
-        exitButton.layer.cornerRadius = 8
-        exitButton.titleLabel?.font = UIFont.systemFont(ofSize: 16, weight: .medium)
+        exitButton.backgroundColor = UIColor.systemRed.withAlphaComponent(0.9)
+        exitButton.layer.cornerRadius = 10
+        exitButton.layer.masksToBounds = true
+        exitButton.titleLabel?.font = UIFont.systemFont(ofSize: 15, weight: .semibold)
         exitButton.translatesAutoresizingMaskIntoConstraints = false
-        exitButton.addTarget(coordinator, action: #selector(coordinator.exitNavigation), for: .touchUpInside)
-        
-        // 剩余距离和时间
+        exitButton.addTarget(coordinator, action: #selector(Coordinator.exitNavigation), for: .touchUpInside)
+
+        let voiceButton = UIButton(type: .system)
+        voiceButton.setImage(UIImage(systemName: "speaker.wave.2.fill"), for: .normal)
+        voiceButton.tintColor = .white
+        voiceButton.backgroundColor = UIColor.white.withAlphaComponent(0.22)
+        voiceButton.layer.cornerRadius = 10
+        voiceButton.layer.masksToBounds = true
+        voiceButton.translatesAutoresizingMaskIntoConstraints = false
+        voiceButton.addTarget(coordinator, action: #selector(Coordinator.voiceReplayTapped), for: .touchUpInside)
+
+        let bottomInner = UIStackView(arrangedSubviews: [exitButton, UIView(), voiceButton])
+        bottomInner.axis = .horizontal
+        bottomInner.alignment = .center
+        bottomInner.translatesAutoresizingMaskIntoConstraints = false
+        bottomBar.addSubview(bottomInner)
+
+        let turnIcon = UIImageView(image: UIImage(systemName: "arrow.up"))
+        turnIcon.tintColor = .white
+        turnIcon.contentMode = .scaleAspectFit
+        turnIcon.translatesAutoresizingMaskIntoConstraints = false
+        turnIcon.widthAnchor.constraint(equalToConstant: 36).isActive = true
+        turnIcon.heightAnchor.constraint(equalToConstant: 36).isActive = true
+
+        let instructionLabel = UILabel()
+        instructionLabel.textColor = .white
+        instructionLabel.font = UIFont.systemFont(ofSize: 17, weight: .semibold)
+        instructionLabel.numberOfLines = 2
+        instructionLabel.adjustsFontSizeToFitWidth = true
+        instructionLabel.minimumScaleFactor = 0.78
+
+        let headingLabel = UILabel()
+        headingLabel.textColor = UIColor.white.withAlphaComponent(0.78)
+        headingLabel.font = UIFont.systemFont(ofSize: 13)
+        headingLabel.text = "朝向 —"
+
         let remainLabel = UILabel()
-        remainLabel.text = "剩余 1.2公里 15分钟"
-        remainLabel.textColor = .white
-        remainLabel.font = UIFont.systemFont(ofSize: 16, weight: .medium)
-        remainLabel.textAlignment = .center
-        remainLabel.translatesAutoresizingMaskIntoConstraints = false
-        
-        // 设置按钮
-        let settingsButton = UIButton(type: .system)
-        settingsButton.setTitle("设置", for: .normal)
-        settingsButton.setTitleColor(.white, for: .normal)
-        settingsButton.backgroundColor = UIColor.gray.withAlphaComponent(0.6)
-        settingsButton.layer.cornerRadius = 8
-        settingsButton.titleLabel?.font = UIFont.systemFont(ofSize: 16, weight: .medium)
-        settingsButton.translatesAutoresizingMaskIntoConstraints = false
-        
-        bottomNavView.addSubview(exitButton)
-        bottomNavView.addSubview(remainLabel)
-        bottomNavView.addSubview(settingsButton)
-        container.addSubview(bottomNavView)
-        
+        remainLabel.textColor = UIColor.white.withAlphaComponent(0.92)
+        remainLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        remainLabel.textAlignment = .natural
+        remainLabel.numberOfLines = 2
+
+        let turnRow = UIStackView(arrangedSubviews: [turnIcon, instructionLabel])
+        turnRow.axis = .horizontal
+        turnRow.spacing = 10
+        turnRow.alignment = .top
+
+        let topInner = UIStackView(arrangedSubviews: [turnRow, headingLabel, remainLabel])
+        topInner.axis = .vertical
+        topInner.spacing = 8
+        topInner.translatesAutoresizingMaskIntoConstraints = false
+        topCard.addSubview(topInner)
+
+        container.addSubview(topCard)
+        container.addSubview(bottomBar)
+
         NSLayoutConstraint.activate([
-            // 底部信息栏 - 紧贴底部
-            bottomNavView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 0),
-            bottomNavView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: 0),
-            bottomNavView.bottomAnchor.constraint(equalTo: container.safeAreaLayoutGuide.bottomAnchor, constant: 0),
-            bottomNavView.heightAnchor.constraint(equalToConstant: 60),
-            
-            // 退出按钮
-            exitButton.leadingAnchor.constraint(equalTo: bottomNavView.leadingAnchor, constant: 16),
-            exitButton.centerYAnchor.constraint(equalTo: bottomNavView.centerYAnchor),
-            exitButton.widthAnchor.constraint(equalToConstant: 60),
-            exitButton.heightAnchor.constraint(equalToConstant: 36),
-            
-            // 剩余信息
-            remainLabel.centerXAnchor.constraint(equalTo: bottomNavView.centerXAnchor),
-            remainLabel.centerYAnchor.constraint(equalTo: bottomNavView.centerYAnchor),
-            
-            // 设置按钮
-            settingsButton.trailingAnchor.constraint(equalTo: bottomNavView.trailingAnchor, constant: -16),
-            settingsButton.centerYAnchor.constraint(equalTo: bottomNavView.centerYAnchor),
-            settingsButton.widthAnchor.constraint(equalToConstant: 60),
-            settingsButton.heightAnchor.constraint(equalToConstant: 36)
+            topInner.topAnchor.constraint(equalTo: topCard.topAnchor, constant: 12),
+            topInner.leadingAnchor.constraint(equalTo: topCard.leadingAnchor, constant: 14),
+            topInner.trailingAnchor.constraint(equalTo: topCard.trailingAnchor, constant: -14),
+            topInner.bottomAnchor.constraint(equalTo: topCard.bottomAnchor, constant: -12),
+
+            topCard.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor, constant: 12),
+            topCard.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
+            topCard.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
+
+            bottomInner.topAnchor.constraint(equalTo: bottomBar.topAnchor, constant: 8),
+            bottomInner.leadingAnchor.constraint(equalTo: bottomBar.leadingAnchor, constant: 12),
+            bottomInner.trailingAnchor.constraint(equalTo: bottomBar.trailingAnchor, constant: -12),
+            bottomInner.bottomAnchor.constraint(equalTo: bottomBar.bottomAnchor, constant: -8),
+            exitButton.widthAnchor.constraint(equalToConstant: 72),
+            exitButton.heightAnchor.constraint(equalToConstant: 40),
+            voiceButton.widthAnchor.constraint(equalToConstant: 48),
+            voiceButton.heightAnchor.constraint(equalToConstant: 40),
+
+            bottomBar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            bottomBar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            bottomBar.bottomAnchor.constraint(equalTo: container.bottomAnchor)
         ])
-        
-        coordinator.topInfoView = topInfoView
-        coordinator.instructionLabel = instructionLabel
-        coordinator.bottomNavView = bottomNavView
+
+        coordinator.navTopInfoView = topCard
+        coordinator.navBottomBarView = bottomBar
         coordinator.exitButton = exitButton
         coordinator.remainLabel = remainLabel
+        coordinator.instructionLabel = instructionLabel
+        coordinator.headingLabel = headingLabel
+        coordinator.voiceButton = voiceButton
+        coordinator.turnIconImageView = turnIcon
     }
 
     class Coordinator: NSObject, MAMapViewDelegate, AMapSearchDelegate, CustomSearchBarViewDelegate, AMapLocationManagerDelegate {
@@ -343,7 +373,6 @@ struct AMapViewRepresentable: UIViewRepresentable {
         var search: AMapSearchAPI?
         var mapView: MAMapView?
         var currentPOI: AMapPOI?
-        let infoCardView = InfoCardView()
         var currentDest: CLLocationCoordinate2D? = nil
         var latestUserLocation: CLLocationCoordinate2D?
         var lastRouteStart: CLLocationCoordinate2D? = nil
@@ -351,25 +380,52 @@ struct AMapViewRepresentable: UIViewRepresentable {
         var startAnnotation: MAPointAnnotation?
         var endAnnotation: MAPointAnnotation?
         var arButton: UIButton?
-        
-        // 导航UI
-        var topInfoView: UIView?
+        var chatBackButton: UIButton?
+        weak var locateButton: UIButton?
+        weak var mapContainerView: UIView?
+        weak var searchBarView: CustomSearchBarView?
+        var floatingButtonConstraints: [NSLayoutConstraint] = []
+
+        // 导航 UI：顶栏信息 + 底栏控制
+        var navTopInfoView: UIView?
+        var navBottomBarView: UIView?
         var instructionLabel: UILabel?
-        var bottomNavView: UIView?
+        var headingLabel: UILabel?
+        var voiceButton: UIButton?
+        var turnIconImageView: UIImageView?
         var exitButton: UIButton?
         var remainLabel: UILabel?
         var isNavigating: Bool = false
         var navigationTimer: Timer? // 保存 Timer 引用，防止内存泄漏
-        
+
+        // POI 检索后多路线选择（大模型路线不经此流程）
+        var isAwaitingPOIRouteChoice: Bool = false
+        var poiRouteChoiceDestination: CLLocationCoordinate2D?
+        var poiRouteOptions: [POIRouteOption] = []
+        var selectedPOIRouteIndex: Int = 0
+        var routeChoicePanel: UIView?
+        var routeChoiceCardButtons: [UIButton] = []
+
         // 路线指引相关
         var routeSteps: [AMapStep] = [] // 保存路线步骤
         var currentStepIndex: Int = 0 // 当前路段索引
-        var routeGuidanceView: UIView? // 路线指引视图
-        var routeGuidanceScrollView: UIScrollView? // 路线指引滚动视图
+        /// 当前整条高德步行方案总距离(米)、总时间(秒)，与 `routeSteps` 同步更新
+        var routeTotalDistanceM: Int = 0
+        var routeTotalDurationSec: Int = 0
+        var routeGuidanceView: UIView? // 已弃用浮层，保留字段避免大范围改动
+        var routeGuidanceScrollView: UIScrollView?
         var routeStepCoordinates: [[CLLocationCoordinate2D]] = [] // 每个路段的坐标点数组
         var navigationDestination: CLLocationCoordinate2D? // 保存导航目的地，用于重新规划
         var lastReplanTime: Date? // 上次重新规划的时间，用于防止频繁重新规划
         var isOffRoute: Bool = false // 是否偏离路线
+
+        // 后端分段导航（方案 2）
+        var lastIngestedNavigationSessionId: Int?
+        var navigationSessionId: Int?
+        var serverSegmentedMode: Bool = false
+        var serverApproachStart: Bool = false
+        var serverActiveLegIndex: Int = 0
+        var serverSegmentWaypoints: [(label: String, coordinate: CLLocationCoordinate2D)] = []
 
         // MARK: - 聊天确认后的多段步行（POI 检索 + 分段高德步行路径）
         var isMultiLegRouting: Bool = false
@@ -383,12 +439,56 @@ struct AMapViewRepresentable: UIViewRepresentable {
             super.init()
             self.search = AMapSearchAPI()
             self.search?.delegate = self
-            infoCardView.isHidden = true
-            infoCardView.onRoute = { [weak self] in
-                guard let self = self, let dest = self.currentDest else { return }
-                print("点击导航按钮，启动步行导航到：\(dest)")
-                self.startWalkingNavigation(to: dest)
+        }
+
+        /// 搜索栏显隐（选路 / 导航时隐藏）
+        func setSearchBarHidden(_ hidden: Bool) {
+            searchBarView?.isHidden = hidden
+        }
+
+        /// 控制定位点方向指示（扇区/箭头）。`followWithHeading` 下需为 true 才稳定显示；浏览地图时关闭以免半透明扇形干扰
+        func applyUserLocationHeadingIndicator(_ mapView: MAMapView, navigating: Bool) {
+            let rep = MAUserLocationRepresentation()
+            rep.showsHeadingIndicator = navigating
+            mapView.update(rep)
+        }
+
+        /// AR、返回聊天、定位：自下而上排列；默认贴容器底，有选路面板/导航底栏时贴其上方
+        func updateFloatingStackLayout() {
+            guard let locate = locateButton, let ar = arButton, let chat = chatBackButton, let box = mapContainerView else { return }
+            NSLayoutConstraint.deactivate(floatingButtonConstraints)
+            floatingButtonConstraints.removeAll()
+            let gap: CGFloat = 12
+            let btnH: CGFloat = 50
+            let defaultBottomPad: CGFloat = 16 + btnH * 3 + gap * 2
+
+            let dockTop: UIView? = {
+                if let p = routeChoicePanel, p.superview != nil { return p }
+                if isNavigating, let b = navBottomBarView, !b.isHidden { return b }
+                return nil
+            }()
+
+            let locateBottom: NSLayoutConstraint
+            if let dock = dockTop {
+                locateBottom = locate.bottomAnchor.constraint(equalTo: dock.topAnchor, constant: -gap)
+            } else {
+                locateBottom = locate.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -defaultBottomPad)
             }
+            let chatBottom = chat.bottomAnchor.constraint(equalTo: locate.topAnchor, constant: -gap)
+            let arBottom = ar.bottomAnchor.constraint(equalTo: chat.topAnchor, constant: -gap)
+            NSLayoutConstraint.activate([locateBottom, chatBottom, arBottom])
+            floatingButtonConstraints = [locateBottom, chatBottom, arBottom]
+        }
+
+        func bringFloatingButtonsToFront() {
+            guard let box = mapContainerView else { return }
+            if let c = chatBackButton { box.bringSubviewToFront(c) }
+            if let l = locateButton { box.bringSubviewToFront(l) }
+            if let a = arButton { box.bringSubviewToFront(a) }
+        }
+
+        @objc func backToChatTapped() {
+            parent.onBackToChat?()
         }
 
         /// 将地图中心移到当前位置（与聊天页右下角布局配套的定位按钮）
@@ -398,7 +498,10 @@ struct AMapViewRepresentable: UIViewRepresentable {
             mapView.showsScale = false
             if let userLoc = mapView.userLocation.location?.coordinate {
                 mapView.setCenter(userLoc, animated: true)
-                mapView.userTrackingMode = .follow
+                mapView.userTrackingMode = isNavigating ? .followWithHeading : .follow
+                if isNavigating {
+                    applyUserLocationHeadingIndicator(mapView, navigating: true)
+                }
                 return
             }
             let locationManager = AMapLocationManager()
@@ -412,9 +515,263 @@ struct AMapViewRepresentable: UIViewRepresentable {
                 guard let loc = location else { return }
                 DispatchQueue.main.async {
                     mapView.setCenter(loc.coordinate, animated: true)
-                    mapView.userTrackingMode = .follow
+                    mapView.userTrackingMode = self.isNavigating ? .followWithHeading : .follow
+                    if self.isNavigating {
+                        self.applyUserLocationHeadingIndicator(mapView, navigating: true)
+                    }
                 }
             }
+        }
+
+        // MARK: - POI 多路线选择
+
+        private func extractAMapPaths(from raw: Any?) -> [AMapPath] {
+            if let arr = raw as? [AMapPath] { return arr }
+            var out: [AMapPath] = []
+            if let ns = raw as? NSArray {
+                for i in 0 ..< ns.count {
+                    if let p = ns[i] as? AMapPath { out.append(p) }
+                }
+            }
+            return out
+        }
+
+        private func parsePOIRouteOption(from path: AMapPath) -> POIRouteOption? {
+            guard let steps = path.steps, !steps.isEmpty else { return nil }
+            var coordinates: [CLLocationCoordinate2D] = []
+            var stepCoords: [[CLLocationCoordinate2D]] = []
+            for step in steps {
+                var sc: [CLLocationCoordinate2D] = []
+                if let polylineStr = step.polyline {
+                    let points = polylineStr.split(separator: ";").compactMap { pair -> CLLocationCoordinate2D? in
+                        let comps = pair.split(separator: ",")
+                        if comps.count == 2, let lon = Double(comps[0]), let lat = Double(comps[1]) {
+                            return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+                        }
+                        return nil
+                    }
+                    sc = points
+                    coordinates.append(contentsOf: points)
+                }
+                stepCoords.append(sc)
+            }
+            guard coordinates.count > 1 else { return nil }
+            return POIRouteOption(
+                distanceM: path.distance,
+                durationSec: path.duration,
+                coordinates: coordinates,
+                steps: steps,
+                stepCoords: stepCoords
+            )
+        }
+
+        func beginPOIRouteSelection(to dest: CLLocationCoordinate2D) {
+            guard let mapView = mapView, let u = mapView.userLocation?.coordinate else {
+                print("❌ [POI路线] 无起点坐标")
+                setSearchBarHidden(false)
+                return
+            }
+            cancelMultiLegRouting(reason: "POI 查看路线")
+            dismissRouteChoicePanel(restoreSearch: false)
+            setSearchBarHidden(true)
+            updateFloatingStackLayout()
+            poiRouteChoiceDestination = dest
+            isAwaitingPOIRouteChoice = true
+            selectedPOIRouteIndex = 0
+            routeChoiceCardButtons = []
+            poiRouteOptions = []
+            searchWalkingRoute(from: u, to: dest, on: mapView)
+        }
+
+        func dismissRouteChoicePanel(restoreSearch: Bool = true) {
+            routeChoicePanel?.removeFromSuperview()
+            routeChoicePanel = nil
+            routeChoiceCardButtons = []
+            if restoreSearch && !isNavigating {
+                setSearchBarHidden(false)
+            }
+            updateFloatingStackLayout()
+        }
+
+        private func presentRouteChoicePanel() {
+            dismissRouteChoicePanel(restoreSearch: false)
+            guard let mapView = mapView, let box = mapView.superview else { return }
+
+            let panel = UIView()
+            panel.backgroundColor = UIColor.systemBackground
+            panel.layer.cornerRadius = 16
+            panel.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+            panel.layer.masksToBounds = true
+            panel.translatesAutoresizingMaskIntoConstraints = false
+
+            let title = UILabel()
+            title.text = "选择步行方案"
+            title.font = UIFont.boldSystemFont(ofSize: 16)
+            title.textColor = .label
+            title.translatesAutoresizingMaskIntoConstraints = false
+
+            let scroll = UIScrollView()
+            scroll.showsHorizontalScrollIndicator = false
+            scroll.translatesAutoresizingMaskIntoConstraints = false
+
+            let stack = UIStackView()
+            stack.axis = .horizontal
+            stack.spacing = 10
+            stack.alignment = .fill
+            stack.translatesAutoresizingMaskIntoConstraints = false
+
+            routeChoiceCardButtons = []
+            for (i, opt) in poiRouteOptions.enumerated() {
+                let b = UIButton(type: .system)
+                b.tag = i
+                let dm = opt.distanceM
+                let dur = opt.durationSec
+                let distStr = dm >= 1000 ? String(format: "%.1f公里", Double(dm) / 1000.0) : "\(dm)米"
+                let mins = max(1, dur / 60)
+                let hrs = mins / 60
+                let m = mins % 60
+                let timeStr = hrs > 0 ? "\(hrs)小时\(m)分" : "\(m)分钟"
+                b.setTitle("\(timeStr)\n\(distStr)\n方案 \(i + 1)", for: .normal)
+                b.titleLabel?.numberOfLines = 3
+                b.titleLabel?.textAlignment = .center
+                b.titleLabel?.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+                b.layer.cornerRadius = 12
+                b.layer.masksToBounds = true
+                b.layer.borderWidth = 2
+                b.contentEdgeInsets = UIEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+                b.addTarget(self, action: #selector(poiRouteCardTapped(_:)), for: .touchUpInside)
+                b.widthAnchor.constraint(equalToConstant: 132).isActive = true
+                stack.addArrangedSubview(b)
+                routeChoiceCardButtons.append(b)
+            }
+
+            scroll.addSubview(stack)
+            let startBtn = UIButton(type: .system)
+            startBtn.setTitle("开始步行导航", for: .normal)
+            startBtn.setTitleColor(.white, for: .normal)
+            startBtn.titleLabel?.font = UIFont.boldSystemFont(ofSize: 17)
+            startBtn.backgroundColor = .systemBlue
+            startBtn.layer.cornerRadius = 12
+            startBtn.layer.masksToBounds = true
+            startBtn.translatesAutoresizingMaskIntoConstraints = false
+            startBtn.addTarget(self, action: #selector(confirmPOIStartWalkingNavigation), for: .touchUpInside)
+
+            panel.addSubview(title)
+            panel.addSubview(scroll)
+            panel.addSubview(startBtn)
+            box.addSubview(panel)
+            routeChoicePanel = panel
+
+            NSLayoutConstraint.activate([
+                panel.leadingAnchor.constraint(equalTo: box.leadingAnchor),
+                panel.trailingAnchor.constraint(equalTo: box.trailingAnchor),
+                panel.bottomAnchor.constraint(equalTo: box.bottomAnchor),
+
+                title.topAnchor.constraint(equalTo: panel.topAnchor, constant: 14),
+                title.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 16),
+
+                scroll.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 10),
+                scroll.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 12),
+                scroll.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -12),
+                scroll.heightAnchor.constraint(equalToConstant: 100),
+
+                stack.topAnchor.constraint(equalTo: scroll.topAnchor),
+                stack.leadingAnchor.constraint(equalTo: scroll.leadingAnchor),
+                stack.trailingAnchor.constraint(equalTo: scroll.trailingAnchor),
+                stack.bottomAnchor.constraint(equalTo: scroll.bottomAnchor),
+                stack.heightAnchor.constraint(equalTo: scroll.heightAnchor),
+
+                startBtn.topAnchor.constraint(equalTo: scroll.bottomAnchor, constant: 12),
+                startBtn.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 16),
+                startBtn.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -16),
+                startBtn.heightAnchor.constraint(equalToConstant: 50),
+                startBtn.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -14)
+            ])
+            refreshRouteChoiceSelection()
+            box.layoutIfNeeded()
+            updateFloatingStackLayout()
+            bringFloatingButtonsToFront()
+        }
+
+        private func refreshRouteChoiceSelection() {
+            for (i, b) in routeChoiceCardButtons.enumerated() {
+                let on = i == selectedPOIRouteIndex
+                b.layer.borderColor = (on ? UIColor.systemBlue : UIColor.separator).cgColor
+                b.backgroundColor = on ? UIColor.systemBlue.withAlphaComponent(0.12) : UIColor.secondarySystemBackground
+                b.setTitleColor(on ? .systemBlue : .label, for: .normal)
+            }
+        }
+
+        @objc private func poiRouteCardTapped(_ sender: UIButton) {
+            selectedPOIRouteIndex = sender.tag
+            refreshRouteChoiceSelection()
+        }
+
+        @objc private func confirmPOIStartWalkingNavigation() {
+            guard let dest = poiRouteChoiceDestination, let mv = mapView else { return }
+            guard selectedPOIRouteIndex < poiRouteOptions.count else { return }
+            let opt = poiRouteOptions[selectedPOIRouteIndex]
+            ingestPOIRouteOption(opt, mapView: mv)
+            dismissRouteChoicePanel(restoreSearch: false)
+            poiRouteOptions = []
+            poiRouteChoiceDestination = nil
+            beginNavigationWithoutRouteSearch(to: dest)
+        }
+
+        private func ingestPOIRouteOption(_ opt: POIRouteOption, mapView: MAMapView) {
+            routeSteps = opt.steps
+            routeStepCoordinates = opt.stepCoords
+            routeTotalDistanceM = opt.distanceM
+            routeTotalDurationSec = opt.durationSec
+            currentStepIndex = 0
+            isOffRoute = false
+            var coords = opt.coordinates
+            mapView.removeOverlays(mapView.overlays)
+            let polyline = MAPolyline(coordinates: &coords, count: UInt(coords.count))
+            mapView.add(polyline)
+        }
+
+        /// 已规划好折线后进入导航（不再请求步行规划）
+        private func beginNavigationWithoutRouteSearch(to destination: CLLocationCoordinate2D) {
+            guard !isNavigating else { return }
+            DispatchQueue.main.async {
+                self.clearServerSegmentedNavigationState()
+                self.isNavigating = true
+                self.hideNonNavigationUI()
+                self.showNavigationUI()
+                self.navigationDestination = destination
+                self.isOffRoute = false
+                self.lastReplanTime = nil
+                guard let mapView = self.mapView else {
+                    self.isNavigating = false
+                    return
+                }
+                mapView.isRotateEnabled = true
+                mapView.userTrackingMode = .followWithHeading
+                self.applyUserLocationHeadingIndicator(mapView, navigating: true)
+                self.jumpToStartLocation()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    self.startNavigationTimer()
+                    self.updateARButtonState()
+                    self.parent.onNavigationStart?()
+                }
+            }
+        }
+
+        @objc func voiceReplayTapped() {
+            let t = instructionLabel?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !t.isEmpty else { return }
+            NavigationSpeechController.shared.speakImmediate(t)
+        }
+
+        private func updateTurnIconForGuidance(_ text: String) {
+            let t = text.lowercased()
+            let name: String
+            if t.contains("左") { name = "arrow.turn.up.left" }
+            else if t.contains("右") { name = "arrow.turn.up.right" }
+            else if t.contains("调头") || t.contains("掉头") { name = "uturn.up" }
+            else { name = "arrow.up" }
+            turnIconImageView?.image = UIImage(systemName: name)
         }
         
         // 搜索功能
@@ -435,6 +792,160 @@ struct AMapViewRepresentable: UIViewRepresentable {
             multiLegGeocodeCoords = []
             multiLegResolvedCoords = nil
             isMultiLegRouting = false
+        }
+
+        // MARK: - 后端分段导航（方案 2）
+
+        func ingestPendingNavigationSession(_ session: NavigationSessionDTO, mapView: MAMapView) {
+            guard !isNavigating else { return }
+            if session.id == lastIngestedNavigationSessionId { return }
+            lastIngestedNavigationSessionId = session.id
+            cancelMultiLegRouting(reason: "后端导航会话")
+            let sorted = session.waypoints.sorted { $0.order < $1.order }
+            let resolved: [(label: String, coordinate: CLLocationCoordinate2D)] = sorted.compactMap { w in
+                guard let la = w.latitude, let lo = w.longitude else { return nil }
+                return (w.label, CLLocationCoordinate2D(latitude: la, longitude: lo))
+            }
+            navigationSessionId = session.id
+            let maxLegStart = max(0, resolved.count - 2)
+            serverActiveLegIndex = min(max(0, session.activeLegIndex), maxLegStart)
+
+            if resolved.count >= 2 {
+                serverSegmentWaypoints = resolved
+                serverSegmentedMode = true
+                startActiveServerSegmentNavigation(on: mapView)
+                return
+            }
+            let names = sorted.map(\.label).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            let deduped = names.reduce(into: [String]()) { acc, s in
+                if acc.last != s { acc.append(s) }
+            }
+            serverSegmentedMode = false
+            serverSegmentWaypoints = []
+            if deduped.count >= 2 {
+                beginMultiLegWalking(names: deduped, mapView: mapView)
+            } else {
+                print("⚠️ [后端导航] 途经点不足且无法地理编码，请配置 AMAP_REST_KEY")
+            }
+        }
+
+        private func startActiveServerSegmentNavigation(on mapView: MAMapView) {
+            guard serverSegmentWaypoints.count >= 2 else { return }
+            guard let finalCoord = serverSegmentWaypoints.last?.coordinate else { return }
+
+            isNavigating = true
+            hideNonNavigationUI()
+            showNavigationUI()
+            navigationDestination = finalCoord
+            isOffRoute = false
+            lastReplanTime = nil
+
+            guard let userCoord = mapView.userLocation?.coordinate else {
+                instructionLabel?.text = "无法获取当前位置，请检查定位权限"
+                isNavigating = false
+                return
+            }
+
+            let w0 = serverSegmentWaypoints[0].coordinate
+            let distToStart = CLLocation(latitude: userCoord.latitude, longitude: userCoord.longitude)
+                .distance(from: CLLocation(latitude: w0.latitude, longitude: w0.longitude))
+            let approachThreshold: CLLocationDistance = 100
+
+            if serverActiveLegIndex == 0 && distToStart > approachThreshold {
+                serverApproachStart = true
+                instructionLabel?.text = "正在规划前往起点…"
+                searchWalkingRoute(from: userCoord, to: w0, on: mapView)
+            } else {
+                serverApproachStart = false
+                let from = serverSegmentWaypoints[serverActiveLegIndex].coordinate
+                let to = serverSegmentWaypoints[serverActiveLegIndex + 1].coordinate
+                instructionLabel?.text = "正在规划第 \(serverActiveLegIndex + 1) 段路线…"
+                searchWalkingRoute(from: from, to: to, on: mapView)
+            }
+
+            mapView.isRotateEnabled = true
+            mapView.userTrackingMode = .followWithHeading
+            applyUserLocationHeadingIndicator(mapView, navigating: true)
+            jumpToStartLocation()
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                guard let self = self else { return }
+                self.startNavigationTimer()
+                self.updateARButtonState()
+                self.parent.onNavigationStart?()
+                NavigationSpeechController.shared.speakImmediate("开始分段导航")
+                if let sid = self.navigationSessionId {
+                    Task {
+                        try? await APIClient.shared.patchNavigationSession(sessionId: sid, activeLegIndex: self.serverActiveLegIndex, status: nil)
+                    }
+                }
+            }
+        }
+
+        private func evaluateServerSegmentAdvance() {
+            guard serverSegmentedMode, isNavigating, let mapView = mapView,
+                  let uid = mapView.userLocation?.coordinate else { return }
+            let n = serverSegmentWaypoints.count
+            guard n >= 2 else { return }
+            let userLoc = CLLocation(latitude: uid.latitude, longitude: uid.longitude)
+
+            if serverApproachStart {
+                let w0 = serverSegmentWaypoints[0].coordinate
+                let d = userLoc.distance(from: CLLocation(latitude: w0.latitude, longitude: w0.longitude))
+                if d > 65 { return }
+                serverApproachStart = false
+                serverActiveLegIndex = 0
+                instructionLabel?.text = "开始第 1 段路线"
+                NavigationSpeechController.shared.speakImmediate("已接近起点，开始途经点导航")
+                let to = serverSegmentWaypoints[1].coordinate
+                searchWalkingRoute(from: w0, to: to, on: mapView)
+                if let sid = navigationSessionId {
+                    Task {
+                        try? await APIClient.shared.patchNavigationSession(sessionId: sid, activeLegIndex: 0, status: nil)
+                    }
+                }
+                return
+            }
+
+            let segmentEndIdx = serverActiveLegIndex + 1
+            if segmentEndIdx >= n { return }
+            let endCoord = serverSegmentWaypoints[segmentEndIdx].coordinate
+            let dEnd = userLoc.distance(from: CLLocation(latitude: endCoord.latitude, longitude: endCoord.longitude))
+            if dEnd > 45 { return }
+
+            if serverActiveLegIndex >= n - 2 {
+                let endName = serverSegmentWaypoints[n - 1].label
+                NavigationSpeechController.shared.speakImmediate("已到达目的地：\(endName)")
+                instructionLabel?.text = "导航结束"
+                if let sid = navigationSessionId {
+                    Task {
+                        try? await APIClient.shared.patchNavigationSession(sessionId: sid, activeLegIndex: n - 2, status: "COMPLETED")
+                    }
+                }
+                exitNavigation()
+                return
+            }
+
+            serverActiveLegIndex += 1
+            let patchedLeg = serverActiveLegIndex
+            let from = serverSegmentWaypoints[serverActiveLegIndex].coordinate
+            let to = serverSegmentWaypoints[serverActiveLegIndex + 1].coordinate
+            let nextName = serverSegmentWaypoints[serverActiveLegIndex + 1].label
+            instructionLabel?.text = "前往：\(nextName)"
+            NavigationSpeechController.shared.speakImmediate("即将前往\(nextName)")
+            searchWalkingRoute(from: from, to: to, on: mapView)
+            if let sid = navigationSessionId {
+                Task {
+                    try? await APIClient.shared.patchNavigationSession(sessionId: sid, activeLegIndex: patchedLeg, status: nil)
+                }
+            }
+        }
+
+        private func clearServerSegmentedNavigationState() {
+            serverSegmentedMode = false
+            serverApproachStart = false
+            serverSegmentWaypoints = []
+            navigationSessionId = nil
         }
 
         func beginMultiLegWalking(names: [String], mapView: MAMapView) {
@@ -575,36 +1086,17 @@ struct AMapViewRepresentable: UIViewRepresentable {
                 return
             }
             
-            let dest = CLLocationCoordinate2D(latitude: CLLocationDegrees(poi.location.latitude), 
+            let dest = CLLocationCoordinate2D(latitude: CLLocationDegrees(poi.location.latitude),
                                             longitude: CLLocationDegrees(poi.location.longitude))
             
+            currentDest = dest
+            updateARButtonState()
+
             DispatchQueue.main.async {
                 mapView.setCenter(dest, animated: true)
                 mapView.setZoomLevel(16, animated: true)
+                self.beginPOIRouteSelection(to: dest)
             }
-            
-            // 显示信息卡片
-            var distanceText: String? = nil
-            if let user = self.latestUserLocation ?? mapView.userLocation.location?.coordinate {
-                let u = CLLocation(latitude: user.latitude, longitude: user.longitude)
-                let d = CLLocation(latitude: dest.latitude, longitude: dest.longitude)
-                let meters = u.distance(from: d)
-                if meters >= 1000 {
-                    distanceText = String(format: "%.1f km", meters/1000)
-                } else {
-                    distanceText = String(format: "%.0f m", meters)
-                }
-            }
-            
-            DispatchQueue.main.async {
-                self.infoCardView.configure(title: poi.name, address: poi.address, distance: distanceText)
-                self.infoCardView.isHidden = false
-            }
-            
-            currentDest = dest
-            
-            // 更新AR按钮状态（只有在导航模式下才启用）
-            updateARButtonState()
         }
         
         // 步行路线规划
@@ -625,6 +1117,38 @@ struct AMapViewRepresentable: UIViewRepresentable {
                     if self.isNavigating {
                         self.instructionLabel?.text = "地图视图不可用"
                     }
+                }
+                return
+            }
+
+            // POI「查看路线」：仅展示多方案 + 开始导航，不走大模型/多段分支
+            if isAwaitingPOIRouteChoice {
+                defer { isAwaitingPOIRouteChoice = false }
+                let pathList = extractAMapPaths(from: response.route.paths)
+                guard !pathList.isEmpty else {
+                    print("❌ [POI路线] 路线数据为空")
+                    DispatchQueue.main.async {
+                        self.setSearchBarHidden(false)
+                        self.updateFloatingStackLayout()
+                    }
+                    return
+                }
+                var options: [POIRouteOption] = []
+                for p in pathList {
+                    if let o = parsePOIRouteOption(from: p) { options.append(o) }
+                }
+                guard !options.isEmpty else {
+                    print("❌ [POI路线] 无法解析任意方案")
+                    DispatchQueue.main.async {
+                        self.setSearchBarHidden(false)
+                        self.updateFloatingStackLayout()
+                    }
+                    return
+                }
+                poiRouteOptions = options
+                selectedPOIRouteIndex = 0
+                DispatchQueue.main.async {
+                    self.presentRouteChoicePanel()
                 }
                 return
             }
@@ -783,6 +1307,8 @@ struct AMapViewRepresentable: UIViewRepresentable {
             
             // 保存路线步骤信息
             self.routeSteps = steps
+            self.routeTotalDistanceM = path.distance
+            self.routeTotalDurationSec = path.duration
             self.currentStepIndex = 0
             self.isOffRoute = false // 路线重新规划后，重置偏离状态
             print("📍 [路线解析] 已保存 \(self.routeStepCoordinates.count) 个路段的坐标点")
@@ -818,36 +1344,8 @@ struct AMapViewRepresentable: UIViewRepresentable {
             // 更新导航信息
             DispatchQueue.main.async {
                 if self.isNavigating {
-                    // 更新距离信息
-                    let distance = path.distance
-                    let distanceText: String
-                    if distance >= 1000 {
-                        distanceText = String(format: "%.1f公里", Double(distance) / 1000.0)
-                    } else {
-                        distanceText = "\(distance)米"
-                    }
-                    
-                    // 更新预计时间（步行速度按5km/h计算）
-                    let walkingSpeed = 5.0 // km/h
-                    let timeInHours = Double(distance) / 1000.0 / walkingSpeed
-                    let timeInMinutes = Int(timeInHours * 60)
-                    let timeText: String
-                    if timeInMinutes < 60 {
-                        timeText = "\(timeInMinutes)分钟"
-                    } else {
-                        let hours = timeInMinutes / 60
-                        let minutes = timeInMinutes % 60
-                        timeText = "\(hours)小时\(minutes)分钟"
-                    }
-                    
-                    // 更新UI
-                    self.remainLabel?.text = "剩余 \(distanceText) \(timeText)"
-                    
-                    // 创建并显示路线指引视图
-                    self.createRouteGuidanceView()
-                    self.updateCurrentStepGuidance()
-                    
-                    print("📍 [路线规划] 距离: \(distanceText), 预计时间: \(timeText)")
+                    self.updateNavigationInfo()
+                    print("📍 [路线规划] 已刷新导航 UI（剩余里程/ETA 来自高德路径）")
                 }
             }
         }
@@ -860,6 +1358,7 @@ struct AMapViewRepresentable: UIViewRepresentable {
             
             // 确保在主线程上执行
             DispatchQueue.main.async {
+                self.clearServerSegmentedNavigationState()
                 self.isNavigating = true
                 
                 // 隐藏搜索框和信息卡片
@@ -889,19 +1388,16 @@ struct AMapViewRepresentable: UIViewRepresentable {
                 self.instructionLabel?.text = "正在规划路线..."
                 self.searchWalkingRoute(from: currentLocation, to: destination, on: mapView)
                 
+                mapView.isRotateEnabled = true
+                mapView.userTrackingMode = .followWithHeading
+                self.applyUserLocationHeadingIndicator(mapView, navigating: true)
                 // 跳转到起始位置
                 self.jumpToStartLocation()
                 
                 // 启动步行导航 - 添加延迟确保UI更新完成
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    self.parent.walkNavManager.startWalkingNavigation(to: destination)
-                    
-                    // 启动导航信息更新定时器
                     self.startNavigationTimer()
-                    
-                    // 更新AR按钮状态（导航开始时启用）
                     self.updateARButtonState()
-                    
                     self.parent.onNavigationStart?()
                 }
             }
@@ -912,18 +1408,44 @@ struct AMapViewRepresentable: UIViewRepresentable {
             guard isNavigating else { return }
             
             print("🛑 [步行导航] 退出导航")
+
+            if let sid = navigationSessionId {
+                Task {
+                    try? await APIClient.shared.patchNavigationSession(sessionId: sid, activeLegIndex: nil, status: "CANCELLED")
+                }
+            }
+            clearServerSegmentedNavigationState()
+            lastIngestedNavigationSessionId = nil
             
             isNavigating = false
-            
+            isAwaitingPOIRouteChoice = false
+            dismissRouteChoicePanel()
+
             // 停止定时器
             stopNavigationTimer()
+
+            routeSteps = []
+            routeStepCoordinates = []
+            routeTotalDistanceM = 0
+            routeTotalDurationSec = 0
+            currentStepIndex = 0
             
-            // 停止导航
-            parent.walkNavManager.stopNavigation()
+            // 停止导航（里程/ETA 已全部来自高德路径，不再使用独立定位管理器）
             
+            routeGuidanceView?.removeFromSuperview()
+            routeGuidanceView = nil
+
             // 隐藏导航UI
             hideNavigationUI()
-            
+
+            if let mv = mapView {
+                mv.removeOverlays(mv.overlays)
+                mv.userTrackingMode = .follow
+                mv.isRotateEnabled = false
+                applyUserLocationHeadingIndicator(mv, navigating: false)
+            }
+            navigationDestination = nil
+
             // 显示搜索框
             showNonNavigationUI()
             
@@ -931,6 +1453,7 @@ struct AMapViewRepresentable: UIViewRepresentable {
             updateARButtonState()
             
             parent.onNavigationStop?()
+            updateFloatingStackLayout()
         }
         
         deinit {
@@ -943,182 +1466,18 @@ struct AMapViewRepresentable: UIViewRepresentable {
         
         // 显示导航UI
         private func showNavigationUI() {
-            topInfoView?.isHidden = false
-            bottomNavView?.isHidden = false
-            routeGuidanceView?.isHidden = false
-            
-            // 更新导航信息
+            navTopInfoView?.isHidden = false
+            navBottomBarView?.isHidden = false
+            updateFloatingStackLayout()
             updateNavigationInfo()
+            bringFloatingButtonsToFront()
         }
         
         // 隐藏导航UI
         private func hideNavigationUI() {
-            topInfoView?.isHidden = true
-            bottomNavView?.isHidden = true
-            routeGuidanceView?.isHidden = true
-        }
-        
-        // 创建路线指引视图（只显示当前路段）
-        private func createRouteGuidanceView() {
-            guard let mapView = mapView, !routeSteps.isEmpty, currentStepIndex < routeSteps.count else { return }
-            
-            // 移除旧的指引视图
-            routeGuidanceView?.removeFromSuperview()
-            
-            // 创建指引视图容器
-            let guidanceView = UIView()
-            guidanceView.backgroundColor = UIColor.black.withAlphaComponent(0.85)
-            guidanceView.layer.cornerRadius = 12
-            guidanceView.translatesAutoresizingMaskIntoConstraints = false
-            guidanceView.isHidden = !isNavigating
-            
-            // 创建内容视图（垂直布局）
-            let contentView = UIStackView()
-            contentView.axis = .vertical
-            contentView.spacing = 10
-            contentView.translatesAutoresizingMaskIntoConstraints = false
-            guidanceView.addSubview(contentView)
-            
-            // 只显示当前路段
-            let currentStep = routeSteps[currentStepIndex]
-            
-            // 计算实时距离信息
-            var distanceToStepEnd = Double(currentStep.distance)
-            var distanceToDestination = distanceToStepEnd
-            
-            if let userLocation = mapView.userLocation?.coordinate {
-                let userLocationPoint = CLLocation(latitude: userLocation.latitude, longitude: userLocation.longitude)
-                
-                // 计算到当前路段终点的距离
-                if currentStepIndex < routeStepCoordinates.count {
-                    let stepCoords = routeStepCoordinates[currentStepIndex]
-                    if !stepCoords.isEmpty {
-                        let endCoord = stepCoords.last!
-                        let endLocation = CLLocation(latitude: endCoord.latitude, longitude: endCoord.longitude)
-                        distanceToStepEnd = userLocationPoint.distance(from: endLocation)
-                    }
-                }
-                
-                // 计算到目的地的总距离
-                if currentStepIndex < routeSteps.count - 1 {
-                    for index in (currentStepIndex + 1)..<routeSteps.count {
-                        distanceToDestination += Double(routeSteps[index].distance)
-                    }
-                }
-                distanceToDestination = distanceToStepEnd + (distanceToDestination - Double(currentStep.distance))
-            } else {
-                // 如果没有位置信息，计算后续路段总距离
-                if currentStepIndex < routeSteps.count - 1 {
-                    for index in (currentStepIndex + 1)..<routeSteps.count {
-                        distanceToDestination += Double(routeSteps[index].distance)
-                    }
-                }
-            }
-            
-            // 创建当前路段卡片（显示实时距离信息）
-            let stepCard = createStepCard(
-                step: currentStep, 
-                index: currentStepIndex, 
-                isCurrent: true,
-                distanceToStepEnd: distanceToStepEnd,
-                distanceToDestination: distanceToDestination
-            )
-            contentView.addArrangedSubview(stepCard)
-            
-            // 设置约束
-            NSLayoutConstraint.activate([
-                contentView.topAnchor.constraint(equalTo: guidanceView.topAnchor, constant: 16),
-                contentView.leadingAnchor.constraint(equalTo: guidanceView.leadingAnchor, constant: 16),
-                contentView.trailingAnchor.constraint(equalTo: guidanceView.trailingAnchor, constant: -16),
-                contentView.bottomAnchor.constraint(equalTo: guidanceView.bottomAnchor, constant: -16)
-            ])
-            
-            // 添加到地图视图
-            mapView.addSubview(guidanceView)
-            NSLayoutConstraint.activate([
-                guidanceView.trailingAnchor.constraint(equalTo: mapView.trailingAnchor, constant: -16),
-                guidanceView.topAnchor.constraint(equalTo: mapView.safeAreaLayoutGuide.topAnchor, constant: 80),
-                guidanceView.widthAnchor.constraint(equalToConstant: 280),
-                guidanceView.heightAnchor.constraint(lessThanOrEqualToConstant: 200) // 只显示一个路段，高度更小
-            ])
-            
-            routeGuidanceView = guidanceView
-        }
-        
-        // 创建路段卡片
-        private func createStepCard(step: AMapStep, index: Int, isCurrent: Bool, distanceToStepEnd: Double? = nil, distanceToDestination: Double? = nil) -> UIView {
-            let card = UIView()
-            card.backgroundColor = isCurrent ? UIColor.systemBlue.withAlphaComponent(0.3) : UIColor.white.withAlphaComponent(0.1)
-            card.layer.cornerRadius = 8
-            card.translatesAutoresizingMaskIntoConstraints = false
-            
-            let stackView = UIStackView()
-            stackView.axis = .vertical
-            stackView.spacing = 6
-            stackView.translatesAutoresizingMaskIntoConstraints = false
-            
-            // 路段序号和状态
-            let headerLabel = UILabel()
-            headerLabel.text = "\(index + 1). \(isCurrent ? "📍 当前路段" : "")"
-            headerLabel.textColor = .white
-            headerLabel.font = UIFont.boldSystemFont(ofSize: 14)
-            stackView.addArrangedSubview(headerLabel)
-            
-            // 导航指令
-            if let instruction = step.instruction {
-                let instructionLabel = UILabel()
-                instructionLabel.text = instruction
-                instructionLabel.textColor = .white
-                instructionLabel.font = UIFont.systemFont(ofSize: 14)
-                instructionLabel.numberOfLines = 0
-                stackView.addArrangedSubview(instructionLabel)
-            }
-            
-            // 道路名称
-            if let road = step.road {
-                let roadLabel = UILabel()
-                roadLabel.text = "道路: \(road)"
-                roadLabel.textColor = UIColor.white.withAlphaComponent(0.8)
-                roadLabel.font = UIFont.systemFont(ofSize: 12)
-                stackView.addArrangedSubview(roadLabel)
-            }
-            
-            // 距离信息（优先显示实时距离）
-            let infoLabel = UILabel()
-            infoLabel.tag = 9999 // 添加标签以便后续更新
-            if let realDistanceToEnd = distanceToStepEnd, isCurrent {
-                // 显示实时距离
-                let distanceText = realDistanceToEnd >= 1000 ? 
-                    String(format: "%.1f公里", realDistanceToEnd / 1000.0) : 
-                    "\(Int(realDistanceToEnd))米"
-                
-                // 如果有到目的地的距离，也显示
-                if let destDistance = distanceToDestination {
-                    let destText = destDistance >= 1000 ? 
-                        String(format: "%.1f公里", destDistance / 1000.0) : 
-                        "\(Int(destDistance))米"
-                    infoLabel.text = "剩余: \(distanceText) | 到目的地: \(destText)"
-                } else {
-                    infoLabel.text = "剩余: \(distanceText)"
-                }
-            } else {
-                // 显示路段原始距离
-                infoLabel.text = "距离: \(step.distance)米 | 时间: \(step.duration / 60)分钟"
-            }
-            infoLabel.textColor = UIColor.white.withAlphaComponent(0.7)
-            infoLabel.font = UIFont.systemFont(ofSize: 12)
-            infoLabel.numberOfLines = 0
-            stackView.addArrangedSubview(infoLabel)
-            
-            card.addSubview(stackView)
-            NSLayoutConstraint.activate([
-                stackView.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
-                stackView.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
-                stackView.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
-                stackView.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12)
-            ])
-            
-            return card
+            navTopInfoView?.isHidden = true
+            navBottomBarView?.isHidden = true
+            updateFloatingStackLayout()
         }
         
         // 根据用户位置判断当前路段，并检测是否偏离路线
@@ -1258,9 +1617,23 @@ struct AMapViewRepresentable: UIViewRepresentable {
             // 记录重新规划时间
             lastReplanTime = Date()
             
-            // 从当前位置重新规划到目的地
+            // 从当前位置重新规划到当前段终点（后端分段模式）或总终点
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                self.searchWalkingRoute(from: userLocation, to: destination, on: mapView)
+                if self.serverSegmentedMode, !self.serverSegmentWaypoints.isEmpty {
+                    let n = self.serverSegmentWaypoints.count
+                    if self.serverApproachStart {
+                        let w0 = self.serverSegmentWaypoints[0].coordinate
+                        self.searchWalkingRoute(from: userLocation, to: w0, on: mapView)
+                    } else if self.serverActiveLegIndex + 1 < n {
+                        let toIdx = self.serverActiveLegIndex + 1
+                        let destCoord = self.serverSegmentWaypoints[toIdx].coordinate
+                        self.searchWalkingRoute(from: userLocation, to: destCoord, on: mapView)
+                    } else {
+                        self.searchWalkingRoute(from: userLocation, to: destination, on: mapView)
+                    }
+                } else {
+                    self.searchWalkingRoute(from: userLocation, to: destination, on: mapView)
+                }
             }
         }
         
@@ -1289,6 +1662,8 @@ struct AMapViewRepresentable: UIViewRepresentable {
                     guidanceText = "继续前行 \(currentStep.distance)米"
                 }
                 instructionLabel?.text = guidanceText
+                updateTurnIconForGuidance(guidanceText)
+                NavigationSpeechController.shared.speakGuidance(guidanceText)
                 return
             }
             
@@ -1333,88 +1708,76 @@ struct AMapViewRepresentable: UIViewRepresentable {
             }
             
             instructionLabel?.text = guidanceText
-            
-            // 重新创建指引视图以显示当前路段（距离会在 updateGuidanceViewDistance 中实时更新）
-            createRouteGuidanceView()
+            updateTurnIconForGuidance(guidanceText)
+            NavigationSpeechController.shared.speakGuidance(guidanceText)
         }
-        
-        // 实时更新指引视图中的距离信息（不重新创建视图，只更新文本）
-        private func updateGuidanceViewDistance() {
-            guard currentStepIndex < routeSteps.count,
-                  let mapView = mapView,
-                  let userLocation = mapView.userLocation?.coordinate,
-                  let guidanceView = routeGuidanceView else {
-                return
-            }
-            
-            let currentStep = routeSteps[currentStepIndex]
-            let userLocationPoint = CLLocation(latitude: userLocation.latitude, longitude: userLocation.longitude)
-            
-            // 计算到当前路段终点的实时距离
-            var distanceToStepEnd = Double(currentStep.distance)
-            if currentStepIndex < routeStepCoordinates.count {
-                let stepCoords = routeStepCoordinates[currentStepIndex]
-                if !stepCoords.isEmpty {
-                    let endCoord = stepCoords.last!
-                    let endLocation = CLLocation(latitude: endCoord.latitude, longitude: endCoord.longitude)
-                    distanceToStepEnd = userLocationPoint.distance(from: endLocation)
-                }
-            }
-            
-            // 计算到目的地的总距离
-            var distanceToDestination = distanceToStepEnd
-            if currentStepIndex < routeSteps.count - 1 {
-                for index in (currentStepIndex + 1)..<routeSteps.count {
-                    distanceToDestination += Double(routeSteps[index].distance)
-                }
-            }
-            
-            // 使用 tag 查找距离标签并更新
-            if let distanceLabel = findLabelWithTag(in: guidanceView, tag: 9999) {
-                let distanceText = distanceToStepEnd >= 1000 ? 
-                    String(format: "%.1f公里", distanceToStepEnd / 1000.0) : 
-                    "\(Int(distanceToStepEnd))米"
-                let destText = distanceToDestination >= 1000 ? 
-                    String(format: "%.1f公里", distanceToDestination / 1000.0) : 
-                    "\(Int(distanceToDestination))米"
-                distanceLabel.text = "剩余: \(distanceText) | 到目的地: \(destText)"
-            }
-        }
-        
-        // 递归查找指定 tag 的标签
-        private func findLabelWithTag(in view: UIView, tag: Int) -> UILabel? {
-            if let label = view as? UILabel, label.tag == tag {
-                return label
-            }
-            for subview in view.subviews {
-                if let found = findLabelWithTag(in: subview, tag: tag) {
-                    return found
-                }
-            }
-            return nil
-        }
-        
-        // 隐藏非导航UI
         private func hideNonNavigationUI() {
-            infoCardView.isHidden = true
-            // 隐藏搜索框
-            for subview in mapView?.subviews ?? [] {
-                if subview is CustomSearchBarView {
-                    subview.isHidden = true
-                    print("🔍 [UI] 隐藏搜索栏")
-                }
-            }
+            setSearchBarHidden(true)
         }
         
         // 显示非导航UI
         private func showNonNavigationUI() {
-            // 显示搜索框
-            for subview in mapView?.subviews ?? [] {
-                if subview is CustomSearchBarView {
-                    subview.isHidden = false
-                    print("🔍 [UI] 显示搜索栏")
+            setSearchBarHidden(false)
+        }
+
+        /// 沿当前高德 `routeSteps` 的剩余路程（米）：到当前 step 终点 + 后续各 step 的 `distance`
+        private func remainingDistanceAlongRouteMeters(user: CLLocationCoordinate2D) -> Double {
+            guard !routeSteps.isEmpty, currentStepIndex < routeSteps.count else { return 0 }
+            let currentStep = routeSteps[currentStepIndex]
+            var distanceToStepEnd = Double(currentStep.distance)
+            if currentStepIndex < routeStepCoordinates.count {
+                let stepCoords = routeStepCoordinates[currentStepIndex]
+                if !stepCoords.isEmpty, let endCoord = stepCoords.last {
+                    let u = CLLocation(latitude: user.latitude, longitude: user.longitude)
+                    let e = CLLocation(latitude: endCoord.latitude, longitude: endCoord.longitude)
+                    distanceToStepEnd = u.distance(from: e)
                 }
             }
+            var remaining = distanceToStepEnd
+            if currentStepIndex + 1 < routeSteps.count {
+                for i in (currentStepIndex + 1)..<routeSteps.count {
+                    remaining += Double(routeSteps[i].distance)
+                }
+            }
+            if routeTotalDistanceM > 0 {
+                remaining = min(remaining, Double(routeTotalDistanceM))
+            }
+            return max(0, remaining)
+        }
+
+        /// 剩余时间（秒）：当前 step 按剩余路程占 step 总长比例 × `duration`，后续 step 累加高德 `duration`
+        private func remainingTimeAlongRouteSec(user: CLLocationCoordinate2D) -> Int {
+            guard !routeSteps.isEmpty, currentStepIndex < routeSteps.count else { return 0 }
+            let currentStep = routeSteps[currentStepIndex]
+            var distanceToStepEnd = Double(currentStep.distance)
+            if currentStepIndex < routeStepCoordinates.count {
+                let stepCoords = routeStepCoordinates[currentStepIndex]
+                if !stepCoords.isEmpty, let endCoord = stepCoords.last {
+                    let u = CLLocation(latitude: user.latitude, longitude: user.longitude)
+                    let e = CLLocation(latitude: endCoord.latitude, longitude: endCoord.longitude)
+                    distanceToStepEnd = u.distance(from: e)
+                }
+            }
+            let stepLen = max(Double(currentStep.distance), 1)
+            let frac = min(1.0, distanceToStepEnd / stepLen)
+            var sec = Int(round(Double(currentStep.duration) * frac))
+            for i in (currentStepIndex + 1)..<routeSteps.count {
+                sec += routeSteps[i].duration
+            }
+            if routeTotalDurationSec > 0 {
+                sec = min(sec, routeTotalDurationSec)
+            }
+            return max(0, sec)
+        }
+
+        private func formatWalkingETA(seconds: Int) -> String {
+            let s = max(0, seconds)
+            if s < 45 { return "不到1分钟" }
+            let mins = s / 60
+            if mins < 60 { return "约\(mins)分钟" }
+            let h = mins / 60
+            let m = mins % 60
+            return m > 0 ? "约\(h)小时\(m)分钟" : "约\(h)小时"
         }
         
         // 更新导航信息
@@ -1426,12 +1789,20 @@ struct AMapViewRepresentable: UIViewRepresentable {
                 // 更新导航指令（这会根据当前路段和实时位置更新）
                 self.updateCurrentStepGuidance()
                 
-                // 实时更新指引视图中的距离信息
-                self.updateGuidanceViewDistance()
-                
-                // 更新剩余距离和时间
-                let distance = self.parent.walkNavManager.distanceToDestination
-                let time = self.parent.walkNavManager.estimatedArrivalTime
+                // 剩余距离 / ETA：完全来自高德路径 steps + duration，非直线近似
+                let distance: Double
+                let time: String
+                if let u = self.mapView?.userLocation?.coordinate, !self.routeSteps.isEmpty {
+                    distance = self.remainingDistanceAlongRouteMeters(user: u)
+                    let sec = self.remainingTimeAlongRouteSec(user: u)
+                    time = self.formatWalkingETA(seconds: sec)
+                } else if self.routeTotalDistanceM > 0 {
+                    distance = Double(self.routeTotalDistanceM)
+                    time = self.formatWalkingETA(seconds: self.routeTotalDurationSec)
+                } else {
+                    distance = 0
+                    time = "--"
+                }
                 
                 // 格式化距离显示
                 let distanceText: String
@@ -1444,6 +1815,24 @@ struct AMapViewRepresentable: UIViewRepresentable {
                 // 更新底部导航栏
                 if let remainLabel = self.remainLabel {
                     remainLabel.text = "剩余 \(distanceText) \(time)"
+                }
+
+                if self.isNavigating {
+                    if let h = self.mapView?.userLocation?.heading {
+                        if h.trueHeading >= 0 {
+                            self.headingLabel?.text = String(format: "朝向 %.0f°", h.trueHeading)
+                        } else {
+                            self.headingLabel?.text = String(format: "朝向 %.0f°", h.magneticHeading)
+                        }
+                    } else if let course = self.mapView?.userLocation?.location?.course, course >= 0 {
+                        self.headingLabel?.text = String(format: "行进方向 %.0f°", course)
+                    } else {
+                        self.headingLabel?.text = "朝向 —"
+                    }
+                }
+
+                if self.serverSegmentedMode {
+                    self.evaluateServerSegmentAdvance()
                 }
             }
         }
@@ -1545,9 +1934,12 @@ struct AMapViewRepresentable: UIViewRepresentable {
             // 设置合适的缩放级别
             mapView.setZoomLevel(16, animated: true)
             
-            // 启用用户位置跟踪和朝向指示器
-            mapView.userTrackingMode = .follow
-            
+            // 导航时跟朝向，需允许地图随航向旋转
+            mapView.userTrackingMode = isNavigating ? .followWithHeading : .follow
+            if isNavigating {
+                applyUserLocationHeadingIndicator(mapView, navigating: true)
+            }
+
             print("✅ [导航] 已跳转到起始位置")
         }
         
@@ -1603,13 +1995,21 @@ struct AMapViewRepresentable: UIViewRepresentable {
                 // 如果正在导航，根据位置更新当前路段和距离
                 if isNavigating {
                     updateCurrentStepBasedOnLocation()
-                    updateGuidanceViewDistance()
                 }
             }
         }
         
         func aMapSearchRequest(_ request: Any!, didFailWithError error: Error!) {
             print("❌ [路线规划] 搜索请求失败：\(error.localizedDescription)")
+            if isAwaitingPOIRouteChoice {
+                isAwaitingPOIRouteChoice = false
+                dismissRouteChoicePanel()
+                DispatchQueue.main.async {
+                    self.setSearchBarHidden(false)
+                    self.updateFloatingStackLayout()
+                }
+                return
+            }
             if isMultiLegRouting || multiLegGeocodeNames != nil {
                 failMultiLeg("高德请求失败：\(error.localizedDescription)")
                 return
@@ -1662,6 +2062,7 @@ class CustomSearchBarView: UIView, UITextFieldDelegate {
         super.init(frame: frame)
         backgroundColor = UIColor.white.withAlphaComponent(0.95)
         layer.cornerRadius = 26
+        layer.masksToBounds = true
         layer.shadowColor = UIColor.black.cgColor
         layer.shadowOpacity = 0.18
         layer.shadowOffset = CGSize(width: 0, height: 2)
@@ -1669,7 +2070,7 @@ class CustomSearchBarView: UIView, UITextFieldDelegate {
         
         iconView.tintColor = .gray
         micView.tintColor = .gray
-        textField.placeholder = "搜索地点/POI"
+        textField.placeholder = "搜索地点"
         textField.font = UIFont.boldSystemFont(ofSize: 18)
         textField.textColor = .darkGray
         textField.delegate = self
@@ -1701,68 +2102,5 @@ class CustomSearchBarView: UIView, UITextFieldDelegate {
         }
         textField.resignFirstResponder()
         return true
-    }
-}
-
-// 信息卡片视图
-class InfoCardView: UIView {
-    private let titleLabel = UILabel()
-    private let addressLabel = UILabel()
-    private let distanceLabel = UILabel()
-    private let routeButton = UIButton(type: .system)
-    var onRoute: (() -> Void)?
-    
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        backgroundColor = .white
-        layer.cornerRadius = 16
-        layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOpacity = 0.12
-        layer.shadowOffset = CGSize(width: 0, height: 2)
-        layer.shadowRadius = 6
-        
-        titleLabel.font = UIFont.boldSystemFont(ofSize: 18)
-        titleLabel.textColor = .black
-        addressLabel.font = UIFont.systemFont(ofSize: 14)
-        addressLabel.textColor = .darkGray
-        addressLabel.numberOfLines = 2
-        distanceLabel.font = UIFont.systemFont(ofSize: 13)
-        distanceLabel.textColor = .gray
-        distanceLabel.numberOfLines = 1
-        
-        routeButton.setTitle("路线/导航", for: .normal)
-        routeButton.titleLabel?.font = UIFont.boldSystemFont(ofSize: 16)
-        routeButton.backgroundColor = UIColor.systemBlue
-        routeButton.setTitleColor(.white, for: .normal)
-        routeButton.layer.cornerRadius = 8
-        routeButton.addTarget(self, action: #selector(routeTapped), for: .touchUpInside)
-        
-        let stack = UIStackView(arrangedSubviews: [titleLabel, distanceLabel, addressLabel, routeButton])
-        stack.axis = .vertical
-        stack.spacing = 10
-        stack.alignment = .leading
-        addSubview(stack)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: topAnchor, constant: 16),
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16),
-            routeButton.heightAnchor.constraint(equalToConstant: 40),
-            routeButton.widthAnchor.constraint(equalToConstant: 120)
-        ])
-    }
-    
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    
-    func configure(title: String, address: String, distance: String? = nil) {
-        titleLabel.text = title
-        addressLabel.text = address
-        distanceLabel.text = distance
-        distanceLabel.isHidden = (distance == nil)
-    }
-    
-    @objc private func routeTapped() {
-        onRoute?()
     }
 }
