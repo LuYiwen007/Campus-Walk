@@ -20,6 +20,10 @@ struct MapView: View {
     /// 由聊天确认路线注入：地名顺序链，地图侧依次 POI 检索后按段请求高德步行路径
     var pendingWalkLegPlaceNames: [String]? = nil
     var onConsumePendingWalkLeg: (() -> Void)? = nil
+    var pendingNavigationSession: NavigationSessionDTO? = nil
+    var onConsumePendingNavigationSession: (() -> Void)? = nil
+    /// 地图页右下角「返回聊天」，与 AR/定位同一套贴底自适应布局
+    var onBackToChat: (() -> Void)? = nil
 
     // 已切换为高德地图，不再需要MapCameraPosition
     var body: some View {
@@ -34,7 +38,10 @@ struct MapView: View {
                     centerCoordinate: centerCoordinate,
                     showSearchBar: true,
                     pendingWalkLegPlaceNames: pendingWalkLegPlaceNames,
-                    onConsumePendingWalkLeg: onConsumePendingWalkLeg
+                    onConsumePendingWalkLeg: onConsumePendingWalkLeg,
+                    pendingNavigationSession: pendingNavigationSession,
+                    onConsumePendingNavigationSession: onConsumePendingNavigationSession,
+                    onBackToChat: onBackToChat
                 )
                     .id(mapViewId)
                     .frame(width: geometry.size.width, height: geometry.size.height)

@@ -6,6 +6,8 @@ class SharedMapState: ObservableObject {
     @Published var cameraPosition: MapCameraPosition = .userLocation(followsHeading: true, fallback: .automatic)
     /// 用户在聊天中确认某条路线后，按「起点 → 途经(最多3) → 终点」地名链交给地图做多段高德步行规划
     @Published var pendingWalkLegPlaceNames: [String]?
+    /// 后端导航会话（途经点坐标与进度以服务端为准）
+    @Published var pendingNavigationSession: NavigationSessionDTO?
 }
 
 // 主Tab视图，包含底部导航栏和各主页面

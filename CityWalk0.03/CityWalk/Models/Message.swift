@@ -49,7 +49,7 @@ struct Message: Identifiable, Equatable {
         id = "\(dto.id)"
         content = dto.content
         isUser = dto.role == "user"
-        timestamp = Self.parseApiDate(dto.sentAt)
+        timestamp = Self.parseApiDate(dto.sentAt ?? "")
         messageType = dto.messageType
         routeVariants = dto.routeBatch?.variants
         imageData = nil
@@ -60,7 +60,7 @@ struct Message: Identifiable, Equatable {
         id = "\(dto.id)"
         content = dto.content
         isUser = dto.role == "user"
-        timestamp = Self.parseApiDate(dto.sentAt)
+        timestamp = Self.parseApiDate(dto.sentAt ?? "")
         messageType = dto.messageType
         self.routeVariants = routeVariants
         imageData = nil

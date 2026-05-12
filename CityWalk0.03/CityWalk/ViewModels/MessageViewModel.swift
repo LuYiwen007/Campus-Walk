@@ -113,15 +113,17 @@ class MessageViewModel: ObservableObject {
                     self.messages[idx].content += piece
                 }
             )
-            if insertAt < messages.count, messages[insertAt].isUser {
-                var um = Message(dto: res.userMessage)
+            if let userDto = res.userMessage, insertAt < messages.count, messages[insertAt].isUser {
+                var um = Message(dto: userDto)
                 if let img = imageJPEGData { um.imageData = img }
                 messages[insertAt] = um
             }
             if let idx = messages.firstIndex(where: { $0.id == tempAsstId }) {
-                messages[idx] = Message(dto: res.assistantMessage, routeVariants: res.routeBatch.variants)
+                let merged = res.routeBatch?.variants ?? res.assistantMessage.routeBatch?.variants
+                messages[idx] = Message(dto: res.assistantMessage, routeVariants: merged)
             } else {
-                messages.append(Message(dto: res.assistantMessage, routeVariants: res.routeBatch.variants))
+                let merged = res.routeBatch?.variants ?? res.assistantMessage.routeBatch?.variants
+                messages.append(Message(dto: res.assistantMessage, routeVariants: merged))
             }
         } catch {
             if messages.count > insertAt {
