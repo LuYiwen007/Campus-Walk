@@ -1,0 +1,30 @@
+PODS:
+  - AMapFoundation (1.8.7)
+  - AMapLocation (2.11.1):
+    - AMapFoundation (>= 1.8.7)
+  - AMapNavi (10.1.600):
+    - AMapFoundation (>= 1.8.2)
+  - AMapSearch (9.7.5):
+    - AMapFoundation (>= 1.8.0)
+
+DEPENDENCIES:
+  - AMapLocation
+  - AMapNavi (~> 10.1.302)
+  - AMapSearch (~> 9.7.4)
+
+SPEC REPOS:
+  trunk:
+    - AMapFoundation
+    - AMapLocation
+    - AMapNavi
+    - AMapSearch
+
+SPEC CHECKSUMS:
+  AMapFoundation: e99da1cc722528c60b39340b4763a95305f6c55e
+  AMapLocation: 6e44f50b044dc54c6b3dcb1dee5ffd6de2689e41
+  AMapNavi: 86bc5bd0100d2fb6a705d608c06b7e1299bd4d56
+  AMapSearch: 29224a399b56b17da1540e4312fc4d9dc37342bb
+
+PODFILE CHECKSUM: 4677f9b4df6cf55c80580d4a3f2626398602e80e
+
+COCOAPODS: 1.16.2

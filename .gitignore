@@ -1,5 +1,11 @@
 # CocoaPods：勿提交，本地执行 `pod install`
 CityWalk0.03/Pods/
+Campus-Walk_React/CityWalk0.03/Pods/
+Campus-Walk_React/CityWalk0.03/mobile/ios/Pods/
+
+# Expo / React Native（勿提交依赖与构建缓存）
+Campus-Walk_React/CityWalk0.03/mobile/node_modules/
+Campus-Walk_React/CityWalk0.03/mobile/ios/build/
 
 # Maven / Spring Boot 构建输出
 backend/target/
