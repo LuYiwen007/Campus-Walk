@@ -1,0 +1,106 @@
+import SwiftUI
+import MapKit
+
+// 地图状态共享对象，负责全局地图摄像头位置同步
+class SharedMapState: ObservableObject {
+    @Published var cameraPosition: MapCameraPosition = .userLocation(followsHeading: true, fallback: .automatic)
+    /// 用户在聊天中确认某条路线后，按「起点 → 途经(最多3) → 终点」地名链交给地图做多段高德步行规划
+    @Published var pendingWalkLegPlaceNames: [String]?
+    /// 后端导航会话（途经点坐标与进度以服务端为准）
+    @Published var pendingNavigationSession: NavigationSessionDTO?
+}
+
+// 主Tab视图，包含底部导航栏和各主页面
+struct MainTabView: View {
+    @Binding var selectedTab: Int // 当前选中的Tab索引
+    @StateObject private var sharedMapState = SharedMapState() // 地图状态共享对象
+    @StateObject private var messageViewModel = MessageViewModel() // 全局聊天数据模型
+    private let tabBarHeight: CGFloat = 64
+    
+    // 主体视图，渲染Tab内容和底部导航栏
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            Group {
+                switch selectedTab {
+                case 0:
+                    // 社区页面
+                    CommunityView()
+                        .padding(.bottom, tabBarHeight)
+                case 1:
+                    // 聊天页面
+                    MessageView(sharedMapState: sharedMapState)
+                        .environmentObject(messageViewModel)
+                        .padding(.bottom, tabBarHeight)
+                case 2:
+                    // 我的页面
+                    TripView()
+                        .padding(.bottom, tabBarHeight)
+                default:
+                    CommunityView()
+                        .padding(.bottom, tabBarHeight)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // 底部Tab栏
+            HStack {
+                TabBarButton(title: "社区", systemImage: "person.3", selected: selectedTab == 0) {
+                    withAnimation(.easeInOut(duration: 0.2)) { selectedTab = 0 }
+                }
+                Spacer()
+                TabBarButton(title: "新的旅程", systemImage: "bubble.left.and.bubble.right", selected: selectedTab == 1) {
+                    withAnimation(.easeInOut(duration: 0.2)) { selectedTab = 1 }
+                }
+                Spacer()
+                TabBarButton(title: "我的", systemImage: "briefcase", selected: selectedTab == 2) {
+                    withAnimation(.easeInOut(duration: 0.2)) { selectedTab = 2 }
+                }
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 64)
+            .background(.bar)
+            .background(Color.white.opacity(0.82))
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(CampusWalkUITheme.borderSubtle)
+                    .frame(height: 1)
+            }
+            .ignoresSafeArea(.all, edges: .bottom)
+        }
+    }
+}
+
+// 底部按钮样式组件
+struct TabBarButton: View {
+    let title: String
+    let systemImage: String
+    let selected: Bool
+    let action: () -> Void
+    // 渲染单个Tab按钮
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 20, weight: .regular))
+                    .symbolVariant(selected ? .fill : .none)
+                    .foregroundStyle(selected ? CampusWalkUITheme.brandBlue : CampusWalkUITheme.textMuted)
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(selected ? CampusWalkUITheme.brandBlue : CampusWalkUITheme.textMuted)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+
+// 我的页面占位视图
+struct MyPageView: View {
+    var body: some View {
+        Color(.systemGroupedBackground)
+            .ignoresSafeArea()
+    }
+}
+
+// 引入新社区页面UI
+// CommunityView 已在 Views 文件夹单独实现 

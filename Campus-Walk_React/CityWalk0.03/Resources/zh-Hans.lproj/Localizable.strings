@@ -1,0 +1,22 @@
+"settings.title" = "设置";
+"settings.preferences" = "偏好设置";
+"settings.chat" = "聊天设置";
+"settings.data" = "数据与存储";
+"settings.about" = "关于";
+
+"settings.theme.system" = "跟随系统";
+"settings.theme.dark" = "深色模式";
+"settings.font.size" = "字体大小";
+"settings.notifications" = "通知";
+"settings.sound" = "音效";
+"settings.haptics" = "触觉反馈";
+"settings.language" = "语言";
+"settings.clear.history" = "清除聊天记录";
+"settings.privacy" = "隐私政策";
+"settings.terms" = "服务条款";
+"settings.version" = "版本";
+
+"notification.route.start" = "开始导航至 %@";
+"notification.route.turn" = "%d 米后 %@";
+"notification.route.arrived" = "您已到达目的地";
+"notification.route.recalculating" = "正在重新规划路线..."; 
