@@ -1,4 +1,5 @@
 # 本目录作为 Campus-Walk 仓库子目录时，勿提交依赖与原生构建产物
+CityWalk0.03/Pods/
 CityWalk0.03/mobile/node_modules/
 CityWalk0.03/mobile/ios/Pods/
 CityWalk0.03/mobile/ios/build/
